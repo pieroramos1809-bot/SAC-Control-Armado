@@ -1,5 +1,5 @@
 /* Service worker: la app abre sin internet. Las llamadas al servidor (Apps Script) nunca se cachean. */
-const VERSION = 'sac-v2-1';
+const VERSION = 'sac-v2-2';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './config.js', './manifest.webmanifest',
   './vendor/xlsx.full.min.js', './vendor/jspdf.umd.min.js', './vendor/jspdf.plugin.autotable.min.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png', './icons/favicon-32.png'];

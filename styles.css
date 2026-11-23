@@ -58,7 +58,7 @@ input[type=checkbox]{width:auto}
 .pills button.on{background:var(--grad);color:#fff;border-color:transparent}
 .chip{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;white-space:nowrap}
 .c-pendiente,.c-bad{background:var(--bab);color:var(--ba)}.c-proceso,.c-warn{background:var(--wab);color:var(--wa)}
-.c-completo,.c-ok{background:var(--okb);color:var(--ok)}.c-sin-necesidad,.c-gray{background:var(--sf2);color:var(--mu);border:1px solid var(--bd)}.c-info{background:var(--inb);color:var(--in)}
+.c-completo,.c-ok{background:var(--okb);color:var(--ok)}.c-sin-necesidad,.c-gray{background:var(--sf2);color:var(--mu);border:1px solid var(--bd)}.c-info{background:var(--inb);color:var(--in)}.c-cancelada{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
 .pu{color:var(--mu);font-weight:600}
 
 /* ---------- tarjetas / kpi ---------- */
