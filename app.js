@@ -1,3 +1,4 @@
+
 /* SAC · Control de Armado de Cajas — App (PWA) v2
    Funciona sin internet: guarda lo que registras y lo envía al servidor (Apps Script) cuando vuelve la conexión. */
 (function () {
@@ -167,17 +168,7 @@ function cargar(msg) {
     if (msg && r.ok) toast(msg);
   });
 }
-/* Datos mostrados = datos del servidor + lo que está pendiente de enviar */
-function derivar() {
-  if (!S.d) { S.v = null; return; }
-  var v = JSON.parse(JSON.stringify(S.d));
-  v.lineas.forEach(function (l) { l._p = 0; });
-  pendientes().forEach(function (o) { if (S.planta === 'TODAS' || o.datos.planta === S.planta) aplicarOp(v, o); });
-  v.lineas.forEach(enr);
-  S.v = v;
-}
-function enr(l) {
-  l.entregado = r2(l.t1 + l.t2);
+
   l.pendiente = l.cancelada ? 0 : Math.max(0, r2(l.porArmar - l.armado));
   l.saldo = l.cancelada ? Math.max(0, r2(l.armado - l.entregado)) : Math.max(0, r2(l.porArmar - l.entregado));
   l.avance = l.porArmar > 0 ? Math.min(100, Math.round(l.armado / l.porArmar * 100)) : (l.armado > 0 ? 100 : 0);
@@ -358,6 +349,7 @@ function selPlanta() {
   if (S.plantas.length > 1) op.push('<option value="TODAS"' + (S.planta === 'TODAS' ? ' selected' : '') + '>TODAS · Mis plantas</option>');
   return '<select id="planta" style="width:auto;max-width:260px;font-weight:700" aria-label="Planta">' + op.join('') + '</select>';
 }
+
 function render() {
   if (!S.token) return vistaLogin('');
   var pags = PAGINAS.filter(function (p) { return ver(p.id); });
@@ -418,7 +410,7 @@ PAG.dashboard = function () {
   var pa = sm('porArmar'), ar = sm('armado'), pc = pa > 0 ? Math.min(100, Math.round(Math.min(ar, pa) / pa * 100)) : 0;
   var bajos = (S.v.stock || []).filter(function (s) { return s.bajo; });
   var kp = [['b-az', 'calendar', 'Líneas programadas', L.length], ['b-vi', 'box', 'Por armar (un)', fn(pa)], ['b-na', 'box', 'Pallets completos', fn(sm('ph')) + ' <span class="pu" style="font-size:13px">PH</span>'], ['b-az', 'tag', 'Puchos (un. sueltas)', fn(sm('puchos'))],
-    ['b-ve', 'check', 'Armado (un)', fn(ar)], ['b-ro', 'alert', 'Pendiente (un)', fn(sm('pendiente'))], ['b-az', 'truck', 'Entregado 1° turno', fn(sm('t1'))], ['b-vi', 'truck', 'Entregado 2° turno', fn(sm('t2'))]];
+    ['b-ve', 'check', 'Armado (un)', fn(ar)], ['b-ro', 'alert', 'Pendiente (un)', fn(sm('pendiente))], ['b-az', 'truck', 'Entregado 1° turno', fn(sm('t1'))], ['b-vi', 'truck', 'Entregado 2° turno', fn(sm('t2'))]];
   if (S.v.stock) kp.push(['b-na', 'warehouse', 'Productos con stock bajo', bajos.length]);
   var dias = {}; L.forEach(function (l) { var k = l.fecha; dias[k] = dias[k] || { l: verFecha(k).slice(0, 5), a: 0, x: 0 }; dias[k].a += l.porArmar; dias[k].x += l.armado; });
   var dd = Object.keys(dias).sort().slice(-10).map(function (k) { return dias[k]; });
@@ -438,20 +430,21 @@ function colsLinea() {
     C('Programa', 'programa', { n: 1 }), C('Nec. temporal', 'nec', { n: 1 }), C('Adicional', 'adicional', { n: 1 }), C('Total', 'total', { n: 1 }), C('Stock', 'stock', { n: 1 }),
     C('Por armar (un)', 'porArmar', { n: 1, f: function (l) { return '<b>' + fn(l.porArmar) + '</b>'; } }),
     P(C('PH + puchos', 'porArmar', { f: function (l) { return ppHtml(l.porArmar, l.capacidad); } })), X(C('PH completos', 'ph', { n: 1 })), X(C('Puchos (un)', 'puchos', { n: 1 })),
+
     C('Pallets (con pucho)', 'pallets', { n: 1, f: function (l) { return l.capacidad > 0 ? fn(l.pallets) : chip('sin capacidad', 'bad'); } }),
     X(C('Armado (un)', 'armado', { n: 1 })), X(C('Pendiente (un)', 'pendiente', { n: 1 })), X(C('Entregado T1', 't1', { n: 1 })), X(C('Entregado T2', 't2', { n: 1 })),
     C('Estado', 'estado', { f: function (l) { return tagEstado(l.estado); }, v: function (l) { return ESTADOS[l.estado]; } }), C('Retiro / motivo', 'motivoCancelacion', { f: function (l) { return l.cancelada ? fn(l.cantidadCancelada) + ' un. · ' + esc(l.motivoCancelacion) : '—'; } })]);
 }
 PAG.programacion = function () {
   var e = ed('programacion'), cols = colsLinea();
-  cols.push(P({ t: '', f: function (l) {
+  cols.push({ p: 1, t: '', f: function (l) {
     var acciones = '<button class="btn ghost sm" data-a="traza" data-id="' + l.id + '">Traza</button>';
     if (e && !l.cancelada) acciones += ' <button class="btn ghost sm" data-a="elinea" data-id="' + l.id + '">Editar</button>';
     if (esAdmin() && !l.cancelada && l.pendiente > 0) acciones += ' <button class="btn red sm" data-a="cancela" data-id="' + l.id + '">Retirar</button>';
     if (e && !l.cancelada && l.armado <= 0 && l.entregado <= 0) acciones += ' <button class="btn red sm" data-a="blinea" data-id="' + l.id + '">✕</button>';
     if (l.cancelada) acciones += ' <span class="chip c-cancelada">Retirada</span>';
     return acciones;
-  } }));
+  } });
   return '<div class="bar">' + (e ? '<button class="btn" data-a="nlinea">' + ic('plus') + ' Nueva línea</button>' : '') + '</div>' + tabla(cols, S.v.lineas, { exp: 'prog', titulo: 'Programación de armado' });
 };
 function listaLineas(modo) {
@@ -518,6 +511,7 @@ function agrupar(g) {
   cols = cols.concat([C('Líneas', 'lineas', { n: 1 }), C('Por armar (un)', 'porArmar', { n: 1 })]);
   if (g === 'producto') cols.push({ t: 'PH completos', n: 1, f: function (o) { return fn(split(o.porArmar, o.cap).ph); }, v: function (o) { return split(o.porArmar, o.cap).ph; } }, { t: 'Puchos (un)', n: 1, f: function (o) { return fn(split(o.porArmar, o.cap).pu); }, v: function (o) { return split(o.porArmar, o.cap).pu; } });
   cols = cols.concat([C('Pallets (con pucho)', 'pallets', { n: 1 }), C('Armado (un)', 'armado', { n: 1 }), C('Pendiente (un)', 'pendiente', { n: 1 }), C('Entregado T1', 't1', { n: 1 }), C('Entregado T2', 't2', { n: 1 })]);
+
   return { titulo: 'Resumen por ' + { dia: 'día', proveedor: 'proveedor', producto: 'producto', planta: 'planta' }[g], cols: cols, filas: filas };
 }
 PAG.reportes = function () {
@@ -598,86 +592,7 @@ function formCancelar(id) {
     '<div class="warn">La programación y su historial no se borrarán. Se bloquearán nuevos armados y entregas para esta línea.</div>' +
     campo('Motivo del retiro (obligatorio)', 'motivo', '', 'required minlength="5"');
   modal('Retirar programación · ' + l.codigo, resumen, function (o) {
-    if (String(o.motivo || '').trim().length < 5) { toast('Escribe un motivo de al menos 5 caracteres.', 1); return false; }
-    return reg('cancelarLinea', { id: l.id, motivo: o.motivo }, 'Programación retirada. El armado y las entregas existentes se conservaron.');
-  });
-}
-function traza(id) {
-  var l = S.v.lineas.filter(function (x) { return x.id === id; })[0] || {};
-  if (String(id).indexOf('tmp_') === 0) return toast('Esta línea aún no se envió al servidor.');
-  if (!online()) return toast('El historial necesita internet.', 1);
-  llamar('trazabilidad', { planta: l.planta || S.planta, id: id }).then(function (r) {
-    if (!r.ok) return toast(r.error, 1);
-    var cap = l.capacidad || 0;
-    modal('Historial · ' + (l.codigo || ''), '<b>Armados</b>' + (r.armado.length ? '<ul>' + r.armado.map(function (a) { return '<li>' + verFecha(a.fecha) + ' ' + esc(a.hora.slice(0, 5)) + ' · ' + ppTxt(a.cantidad, cap) + ' (' + fn(a.cantidad) + ' un.)' + (a.ubicacion ? ' · ' + esc(a.ubicacion) : '') + ' · ' + esc(a.usuario) + (a.observaciones ? ' · ' + esc(a.observaciones) : '') + '</li>'; }).join('') + '</ul>' : '<p class="pu">Sin armados.</p>') +
-      '<b>Entregas</b>' + (r.entregas.length ? '<ul>' + r.entregas.map(function (e) { return '<li>' + verFecha(e.fecha) + ' ' + esc(e.hora.slice(0, 5)) + ' · T' + e.turno + ' · ' + ppTxt(e.cantidad, cap) + ' (' + fn(e.cantidad) + ' un.) · ' + esc(e.responsable) + (e.forzada ? ' · ⚠ excedida' : '') + '</li>'; }).join('') + '</ul>' : '<p class="pu">Sin entregas.</p>') +
-      (r.cancelacion ? '<div class="warn"><b>Programación retirada</b><br>Cantidad cancelada: ' + fn(r.cancelacion.cantidad_cancelada) + ' un.<br>Motivo: ' + esc(r.cancelacion.motivo) + '<br>Por: ' + esc(r.cancelacion.usuario) + ' · ' + esc(r.cancelacion.cuando) + '</div>' : ''));
-  });
-}
-function formArmado(id) {
-  var l = S.v.lineas.filter(function (x) { return x.id === id; })[0]; if (!l) return;
-  modal('Registrar armado · ' + l.codigo, '<div class="calc">' + esc(l.descripcion) + '<br>Pendiente: ' + ppHtml(l.pendiente, l.capacidad) + ' (' + fn(l.pendiente) + ' un.)</div>' + ppCampos() + sel('Ubicación del armado', 'ubicacion', opcUbi(), '') + campo('Observaciones', 'observaciones', ''), function (o) {
-    var c = cantDe(o, l.capacidad);
-    if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
-    if (c > l.pendiente + 0.001) { toast('Excede el pendiente (' + fn(l.pendiente) + ' un.).', 1); return false; }
-    return reg('armado', { lineaId: l.id, fecha: l.fecha, codigo: l.codigo, ph: o.ph, puchos: o.puchos, ubicacion: o.ubicacion, observaciones: o.observaciones }, 'Armado registrado.');
-  });
-  bindPP($('mf'), function () { return l.capacidad; }, function (c) { return 'Quedaría pendiente: ' + ppHtml(Math.max(0, l.pendiente - c), l.capacidad); });
-}
-function formEntrega(id, turno) {
-  var l = S.v.lineas.filter(function (x) { return x.id === id; })[0]; if (!l) return;
-  modal('Entrega ' + turno + '° turno · ' + l.codigo, '<div class="calc">' + esc(l.descripcion) + '<br>' + (l.cancelada ? 'Armado disponible para entregar ' : 'Autorizado ') + ppHtml(l.cancelada ? l.armado : l.porArmar, l.capacidad) + ' · saldo ' + ppHtml(l.saldo, l.capacidad) + '</div>' + ppCampos() + campo('Responsable de la entrega', 'responsable', S.user.nombre, 'required'), function (o) {
-    var c = cantDe(o, l.capacidad);
-    if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
-    if (l.cancelada && c > l.saldo + 0.001) { toast('La programación está retirada. Solo puedes entregar lo ya armado que queda disponible (' + fn(l.saldo) + ' un.).', 1); return false; }
-    var forzar = false;
-    if (!l.cancelada && l.entregado + c > l.porArmar + 0.001) {
-      if (!confirm('La entrega supera lo autorizado (saldo ' + fn(l.saldo) + ' un.). ¿Registrar de todos modos? Quedará marcada en la auditoría.')) return false;
-      forzar = true;
-    }
-    return reg('entrega', { lineaId: l.id, fecha: l.fecha, codigo: l.codigo, turno: turno, ph: o.ph, puchos: o.puchos, responsable: o.responsable, forzar: forzar }, 'Entrega registrada.');
-  });
-  bindPP($('mf'), function () { return l.capacidad; }, function (c) { return 'Saldo después: ' + ppHtml(Math.max(0, l.saldo - c), l.capacidad); });
-}
-function formMov(tipo) {
-  var ops = opcProd(); if (!ops.length) return toast('No hay productos activos.', 1);
-  modal(tipo === 'entrada' ? 'Entrada de mercadería · ' + S.planta : 'Salida de almacén · ' + S.planta, sel('Producto', 'codigo', ops, '') + '<div class="calc" id="info"></div>' + ppCampos() + sel('Ubicación', 'ubicacion', opcUbi(), '') +
-    (tipo === 'entrada' ? '<div class="warn">Si indicas un lote, la entrada crea el lote. Sin lote queda como stock no asignado.</div><div class="r2">' + campo('Lote (opcional)', 'lote', '') + campo('Vence (opcional)', 'vencimiento', '', 'type="date"') + '</div>' : '<div class="warn">La salida usa primero el stock no asignado y luego los lotes que vencen antes (FEFO).</div>') + campo('Motivo', 'motivo', '') + campo('Referencia', 'referencia', ''), function (o) {
-      var p = prodDe(o.codigo), c = cantDe(o, p ? p.capacidad : 0);
-      if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
-      if (tipo === 'salida' && c > stockDe(o.codigo).stock + 0.001) { toast('Stock insuficiente: hay ' + fn(stockDe(o.codigo).stock) + ' un.', 1); return false; }
-      return reg('mover', { codigo: o.codigo, tipo: tipo, ph: o.ph, puchos: o.puchos, ubicacion: o.ubicacion, lote: o.lote, vencimiento: o.vencimiento, motivo: o.motivo, referencia: o.referencia }, 'Movimiento registrado.');
-    });
-  var f = $('mf'), up = bindPP(f, function () { var p = prodDe(f.codigo.value); return p ? p.capacidad : 0; });
-  f.codigo.addEventListener('change', function () { var s = stockDe(f.codigo.value); $('info').innerHTML = 'Stock: ' + ppHtml(s.stock, (prodDe(f.codigo.value) || {}).capacidad) + ' · no asignado ' + fn(s.noAsignado); up(); });
-  f.codigo.dispatchEvent(new Event('change'));
-}
-function formMerma() {
-  modal('Registrar merma · ' + S.planta, sel('Producto', 'codigo', opcProd(), '') + '<label class="f"><span>Lote (opcional)</span><select name="loteId" id="mlote"></select></label><div class="calc" id="mhelp"></div>' + ppCampos() + sel('Ubicación (si no hay lote)', 'ubicacion', opcUbi(), '') +
-    sel('Motivo', 'motivo', S.v.motivosMerma, '') + campo('Observaciones', 'observaciones', ''), function (o) {
-      var p = prodDe(o.codigo), c = cantDe(o, p ? p.capacidad : 0), s = stockDe(o.codigo);
-      if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
-      if (o.loteId) { var l = (S.v.lotes || []).filter(function (x) { return x.id === o.loteId; })[0]; if (l && c > l.cant_disp + 0.001) { toast('El lote solo tiene ' + fn(l.cant_disp) + ' disponibles.', 1); return false; } }
-      else if (c > s.noAsignado + 0.001) { toast('Sin lote solo puedes mermar stock no asignado (' + fn(s.noAsignado) + ').', 1); return false; }
-      return reg('merma', { codigo: o.codigo, loteId: o.loteId, ph: o.ph, puchos: o.puchos, ubicacion: o.ubicacion, motivo: o.motivo, observaciones: o.observaciones }, 'Merma registrada.');
-    });
-  var f = $('mf'), up = bindPP(f, function () { var p = prodDe(f.codigo.value); return p ? p.capacidad : 0; });
-  function act() {
-    var s = stockDe(f.codigo.value), ls = (S.v.lotes || []).filter(function (l) { return l.planta === S.planta && l.codigo === f.codigo.value && l.cant_disp > 0; });
-    $('mlote').innerHTML = '<option value="">Sin lote (stock no asignado)</option>' + ls.map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.lote) + ' · disp. ' + fn(l.cant_disp) + '</option>'; }).join('');
-    $('mhelp').innerHTML = 'Stock general ' + fn(s.stock) + ' · no asignado <b>' + fn(s.noAsignado) + '</b>'; up();
-  }
-  f.codigo.addEventListener('change', act); act();
-}
-function formLote() {
-  modal('Registrar lote · ' + S.planta, sel('Producto', 'codigo', opcProd(), '') + '<div class="calc" id="lhelp"></div>' + campo('Código de lote', 'lote', '', 'required') + campo('Vencimiento (opcional)', 'vencimiento', '', 'type="date"') + ppCampos() + sel('Ubicación', 'ubicacion', opcUbi(), '') +
-    '<div class="warn">Esto <b>asigna</b> stock existente a un lote (no suma stock). Para mercadería nueva con lote usa «Entrada».</div>', function (o) {
-      var p = prodDe(o.codigo), c = cantDe(o, p ? p.capacidad : 0);
-      if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
-      if (c > stockDe(o.codigo).noAsignado + 0.001) { toast('Solo hay ' + fn(stockDe(o.codigo).noAsignado) + ' un. sin asignar.', 1); return false; }
-      return reg('asignarLote', { codigo: o.codigo, lote: o.lote, vencimiento: o.vencimiento, ph: o.ph, puchos: o.puchos, ubicacion: o.ubicacion }, 'Lote registrado.');
-    });
-  var f = $('mf'), up = bindPP(f, function () { var p = prodDe(f.codigo.value); return p ? p.capacidad : 0; });
+
   f.codigo.addEventListener('change', function () { $('lhelp').innerHTML = 'Stock no asignado disponible: <b>' + fn(stockDe(f.codigo.value).noAsignado) + '</b>'; up(); }); f.codigo.dispatchEvent(new Event('change'));
 }
 function formAjuste() {
@@ -758,6 +673,88 @@ function bindImportar() {
   var inp = $('xl'); if (!inp) return;
   inp.onchange = function (e) {
     var file = e.target.files[0]; if (!file) return;
+
+    if (String(o.motivo || '').trim().length < 5) { toast('Escribe un motivo de al menos 5 caracteres.', 1); return false; }
+    return reg('cancelarLinea', { id: l.id, motivo: o.motivo }, 'Programación retirada. El armado y las entregas existentes se conservaron.');
+  });
+}
+function traza(id) {
+  var l = S.v.lineas.filter(function (x) { return x.id === id; })[0] || {};
+  if (String(id).indexOf('tmp_') === 0) return toast('Esta línea aún no se envió al servidor.');
+  if (!online()) return toast('El historial necesita internet.', 1);
+  llamar('trazabilidad', { planta: l.planta || S.planta, id: id }).then(function (r) {
+    if (!r.ok) return toast(r.error, 1);
+    var cap = l.capacidad || 0;
+    modal('Historial · ' + (l.codigo || ''), '<b>Armados</b>' + (r.armado.length ? '<ul>' + r.armado.map(function (a) { return '<li>' + verFecha(a.fecha) + ' ' + esc(a.hora.slice(0, 5)) + ' · ' + ppTxt(a.cantidad, cap) + ' (' + fn(a.cantidad) + ' un.)' + (a.ubicacion ? ' · ' + esc(a.ubicacion) : '') + ' · ' + esc(a.usuario) + (a.observaciones ? ' · ' + esc(a.observaciones) : '') + '</li>'; }).join('') + '</ul>' : '<p class="pu">Sin armados.</p>') +
+      '<b>Entregas</b>' + (r.entregas.length ? '<ul>' + r.entregas.map(function (e) { return '<li>' + verFecha(e.fecha) + ' ' + esc(e.hora.slice(0, 5)) + ' · T' + e.turno + ' · ' + ppTxt(e.cantidad, cap) + ' (' + fn(e.cantidad) + ' un.) · ' + esc(e.responsable) + (e.forzada ? ' · ⚠ excedida' : '') + '</li>'; }).join('') + '</ul>' : '<p class="pu">Sin entregas.</p>') +
+      (r.cancelacion ? '<div class="warn"><b>Programación retirada</b><br>Cantidad cancelada: ' + fn(r.cancelacion.cantidad_cancelada) + ' un.<br>Motivo: ' + esc(r.cancelacion.motivo) + '<br>Por: ' + esc(r.cancelacion.usuario) + ' · ' + esc(r.cancelacion.cuando) + '</div>' : ''));
+  });
+}
+function formArmado(id) {
+  var l = S.v.lineas.filter(function (x) { return x.id === id; })[0]; if (!l) return;
+  modal('Registrar armado · ' + l.codigo, '<div class="calc">' + esc(l.descripcion) + '<br>Pendiente: ' + ppHtml(l.pendiente, l.capacidad) + ' (' + fn(l.pendiente) + ' un.)</div>' + ppCampos() + sel('Ubicación del armado', 'ubicacion', opcUbi(), '') + campo('Observaciones', 'observaciones', ''), function (o) {
+    var c = cantDe(o, l.capacidad);
+    if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
+    if (c > l.pendiente + 0.001) { toast('Excede el pendiente (' + fn(l.pendiente) + ' un.).', 1); return false; }
+    return reg('armado', { lineaId: l.id, fecha: l.fecha, codigo: l.codigo, ph: o.ph, puchos: o.puchos, ubicacion: o.ubicacion, observaciones: o.observaciones }, 'Armado registrado.');
+  });
+  bindPP($('mf'), function () { return l.capacidad; }, function (c) { return 'Quedaría pendiente: ' + ppHtml(Math.max(0, l.pendiente - c), l.capacidad); });
+}
+function formEntrega(id, turno) {
+  var l = S.v.lineas.filter(function (x) { return x.id === id; })[0]; if (!l) return;
+  modal('Entrega ' + turno + '° turno · ' + l.codigo, '<div class="calc">' + esc(l.descripcion) + '<br>' + (l.cancelada ? 'Armado disponible para entregar ' : 'Autorizado ') + ppHtml(l.cancelada ? l.armado : l.porArmar, l.capacidad) + ' · saldo ' + ppHtml(l.saldo, l.capacidad) + '</div>' + ppCampos() + campo('Responsable de la entrega', 'responsable', S.user.nombre, 'required'), function (o) {
+    var c = cantDe(o, l.capacidad);
+    if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
+    if (l.cancelada && c > l.saldo + 0.001) { toast('La programación está retirada. Solo puedes entregar lo ya armado que queda disponible (' + fn(l.saldo) + ' un.).', 1); return false; }
+    var forzar = false;
+    if (!l.cancelada && l.entregado + c > l.porArmar + 0.001) {
+      if (!confirm('La entrega supera lo autorizado (saldo ' + fn(l.saldo) + ' un.). ¿Registrar de todos modos? Quedará marcada en la auditoría.')) return false;
+      forzar = true;
+    }
+    return reg('entrega', { lineaId: l.id, fecha: l.fecha, codigo: l.codigo, turno: turno, ph: o.ph, puchos: o.puchos, responsable: o.responsable, forzar: forzar }, 'Entrega registrada.');
+  });
+  bindPP($('mf'), function () { return l.capacidad; }, function (c) { return 'Saldo después: ' + ppHtml(Math.max(0, l.saldo - c), l.capacidad); });
+}
+function formMov(tipo) {
+  var ops = opcProd(); if (!ops.length) return toast('No hay productos activos.', 1);
+  modal(tipo === 'entrada' ? 'Entrada de mercadería · ' + S.planta : 'Salida de almacén · ' + S.planta, sel('Producto', 'codigo', ops, '') + '<div class="calc" id="info"></div>' + ppCampos() + sel('Ubicación', 'ubicacion', opcUbi(), '') +
+    (tipo === 'entrada' ? '<div class="warn">Si indicas un lote, la entrada crea el lote. Sin lote queda como stock no asignado.</div><div class="r2">' + campo('Lote (opcional)', 'lote', '') + campo('Vence (opcional)', 'vencimiento', '', 'type="date"') + '</div>' : '<div class="warn">La salida usa primero el stock no asignado y luego los lotes que vencen antes (FEFO).</div>') + campo('Motivo', 'motivo', '') + campo('Referencia', 'referencia', ''), function (o) {
+      var p = prodDe(o.codigo), c = cantDe(o, p ? p.capacidad : 0);
+      if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
+      if (tipo === 'salida' && c > stockDe(o.codigo).stock + 0.001) { toast('Stock insuficiente: hay ' + fn(stockDe(o.codigo).stock) + ' un.', 1); return false; }
+      return reg('mover', { codigo: o.codigo, tipo: tipo, ph: o.ph, puchos: o.puchos, ubicacion: o.ubicacion, lote: o.lote, vencimiento: o.vencimiento, motivo: o.motivo, referencia: o.referencia }, 'Movimiento registrado.');
+    });
+  var f = $('mf'), up = bindPP(f, function () { var p = prodDe(f.codigo.value); return p ? p.capacidad : 0; });
+  f.codigo.addEventListener('change', function () { var s = stockDe(f.codigo.value); $('info').innerHTML = 'Stock: ' + ppHtml(s.stock, (prodDe(f.codigo.value) || {}).capacidad) + ' · no asignado ' + fn(s.noAsignado); up(); });
+  f.codigo.dispatchEvent(new Event('change'));
+}
+function formMerma() {
+  modal('Registrar merma · ' + S.planta, sel('Producto', 'codigo', opcProd(), '') + '<label class="f"><span>Lote (opcional)</span><select name="loteId" id="mlote"></select></label><div class="calc" id="mhelp"></div>' + ppCampos() + sel('Ubicación (si no hay lote)', 'ubicacion', opcUbi(), '') +
+    sel('Motivo', 'motivo', S.v.motivosMerma, '') + campo('Observaciones', 'observaciones', ''), function (o) {
+      var p = prodDe(o.codigo), c = cantDe(o, p ? p.capacidad : 0), s = stockDe(o.codigo);
+      if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
+      if (o.loteId) { var l = (S.v.lotes || []).filter(function (x) { return x.id === o.loteId; })[0]; if (l && c > l.cant_disp + 0.001) { toast('El lote solo tiene ' + fn(l.cant_disp) + ' disponibles.', 1); return false; } }
+      else if (c > s.noAsignado + 0.001) { toast('Sin lote solo puedes mermar stock no asignado (' + fn(s.noAsignado) + ').', 1); return false; }
+      return reg('merma', { codigo: o.codigo, loteId: o.loteId, ph: o.ph, puchos: o.puchos, ubicacion: o.ubicacion, motivo: o.motivo, observaciones: o.observaciones }, 'Merma registrada.');
+    });
+  var f = $('mf'), up = bindPP(f, function () { var p = prodDe(f.codigo.value); return p ? p.capacidad : 0; });
+  function act() {
+    var s = stockDe(f.codigo.value), ls = (S.v.lotes || []).filter(function (l) { return l.planta === S.planta && l.codigo === f.codigo.value && l.cant_disp > 0; });
+    $('mlote').innerHTML = '<option value="">Sin lote (stock no asignado)</option>' + ls.map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.lote) + ' · disp. ' + fn(l.cant_disp) + '</option>'; }).join('');
+    $('mhelp').innerHTML = 'Stock general ' + fn(s.stock) + ' · no asignado <b>' + fn(s.noAsignado) + '</b>'; up();
+  }
+  f.codigo.addEventListener('change', act); act();
+}
+function formLote() {
+  modal('Registrar lote · ' + S.planta, sel('Producto', 'codigo', opcProd(), '') + '<div class="calc" id="lhelp"></div>' + campo('Código de lote', 'lote', '', 'required') + campo('Vencimiento (opcional)', 'vencimiento', '', 'type="date"') + ppCampos() + sel('Ubicación', 'ubicacion', opcUbi(), '') +
+    '<div class="warn">Esto <b>asigna</b> stock existente a un lote (no suma stock). Para mercadería nueva con lote usa «Entrada».</div>', function (o) {
+      var p = prodDe(o.codigo), c = cantDe(o, p ? p.capacidad : 0);
+      if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
+      if (c > stockDe(o.codigo).noAsignado + 0.001) { toast('Solo hay ' + fn(stockDe(o.codigo).noAsignado) + ' un. sin asignar.', 1); return false; }
+      return reg('asignarLote', { codigo: o.codigo, lote: o.lote, vencimiento: o.vencimiento, ph: o.ph, puchos: o.puchos, ubicacion: o.ubicacion }, 'Lote registrado.');
+    });
+  var f = $('mf'), up = bindPP(f, function () { var p = prodDe(f.codigo.value); return p ? p.capacidad : 0; });
+
     var rd = new FileReader();
     rd.onload = function (ev) {
       try {
