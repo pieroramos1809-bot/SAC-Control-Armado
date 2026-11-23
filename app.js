@@ -85,7 +85,7 @@ var COLA = ['guardarLinea', 'armado', 'entrega', 'mover', 'merma', 'asignarLote'
 var PAGINAS = [
   { id: 'dashboard', t: 'Dashboard', i: 'dashboard' }, { id: 'programacion', t: 'Programación', i: 'calendar' }, { id: 'armado', t: 'Armado', i: 'box' },
   { id: 'entregas', t: 'Entregas', i: 'truck' }, { id: 'almacen', t: 'Almacén', i: 'warehouse' }, { id: 'productos', t: 'Productos', i: 'tag' },
-  { id: 'importar', t: 'Importar', i: 'upload' }, { id: 'reportes', t: 'Reportes', i: 'chart' }, { id: 'usuarios', t: 'Administración', i: 'users' }
+  { id: 'importar', t: 'Importar', i: 'upload' }, { id: 'reportes', t: 'Reportes', i: 'chart' }, { id: 'personal', t: 'Personal', i: 'users' }, { id: 'usuarios', t: 'Administración', i: 'users' }
 ];
 var ESTADOS = { pendiente: 'Pendiente', proceso: 'En proceso', completo: 'Completo', 'sin-necesidad': 'Sin necesidad', cancelada: 'Retirada' };
 var online = function () { return navigator.onLine !== false; };
@@ -350,7 +350,7 @@ function banners() {
   return h;
 }
 function filtros() {
-  if (['dashboard', 'programacion', 'armado', 'entregas', 'reportes'].indexOf(S.pag) < 0) return '';
+  if (['dashboard', 'programacion', 'armado', 'entregas', 'reportes', 'personal'].indexOf(S.pag) < 0) return '';
   return '<div class="bar"><label class="f"><span>Desde</span><input type="date" id="fd" value="' + S.f.desde + '"></label><label class="f"><span>Hasta</span><input type="date" id="fh" value="' + S.f.hasta + '"></label><button class="btn ghost" data-a="filtrar">Aplicar rango</button></div>';
 }
 function selPlanta() {
@@ -464,7 +464,7 @@ function listaLineas(modo) {
     var e = ed(modo), tp = l.planta !== S.planta && S.planta === 'TODAS' ? ' ' + chip(esc(l.planta), 'info') : '';
     var head = '<div class="h"><div><div class="cod">' + esc(l.codigo) + tp + '</div><div class="ds">' + esc(l.descripcion) + '</div></div>' + (l._p ? chip('por enviar', 'warn') : tagEstado(l.estado)) + '</div>';
     if (modo === 'armado') return '<div class="card ln ' + (l._p ? 'pendiente' : '') + '">' + head + '<div><small class="pu">Por armar</small><div class="big">' + ppHtml(l.porArmar, l.capacidad) + '</div><div class="ds">' + fn(l.porArmar) + ' unidades · ' + verFecha(l.fecha) + ' · ' + esc(l.proveedor) + '</div></div>' + barra(l.avance, l.avance < 100 ? 'y' : '') +
-      '<div class="st"><div><small>Armado</small>' + ppHtml(l.armado, l.capacidad) + '</div><div><small>Pendiente</small>' + ppHtml(l.pendiente, l.capacidad) + '</div></div><div class="acts">' + (e && l.pendiente > 0 ? '<button class="btn" data-a="armar" data-id="' + l.id + '">' + ic('plus') + ' Registrar armado</button>' : '') + '<button class="btn ghost" data-a="traza" data-id="' + l.id + '">Historial</button></div></div>';
+      '<div class="st"><div><small>Armado</small>' + ppHtml(l.armado, l.capacidad) + '</div><div><small>Pendiente</small>' + ppHtml(l.pendiente, l.capacidad) + '</div></div><div class="acts">' + (e ? '<button class="btn" data-a="armar" data-id="' + l.id + '">' + ic('plus') + ' Registrar armado</button>' : '') + '<button class="btn ghost" data-a="traza" data-id="' + l.id + '">Historial</button></div></div>';
     return '<div class="card ln ' + (l._p ? 'pendiente' : '') + '">' + head + '<div><small class="pu">' + (l.cancelada ? 'Armado disponible para entregar' : 'Autorizado (por armar)') + '</small><div class="big">' + ppHtml(l.cancelada ? l.armado : l.porArmar, l.capacidad) + '</div><div class="ds">' + verFecha(l.fecha) + ' · ' + esc(l.proveedor) + '</div></div>' + barra((l.cancelada ? l.armado : l.porArmar) > 0 ? Math.min(100, Math.round(l.entregado / (l.cancelada ? l.armado : l.porArmar) * 100)) : 0) +
       '<div class="st"><div><small>1° turno</small>' + ppHtml(l.t1, l.capacidad) + '</div><div><small>2° turno</small>' + ppHtml(l.t2, l.capacidad) + '</div><div><small>Entregado</small>' + ppHtml(l.entregado, l.capacidad) + '</div><div><small>Saldo</small>' + ppHtml(l.saldo, l.capacidad) + '</div></div>' +
       '<div class="acts">' + (e && l.saldo > 0 ? '<button class="btn" data-a="entregar" data-id="' + l.id + '" data-t="1">+ 1° turno</button><button class="btn ghost" data-a="entregar" data-id="' + l.id + '" data-t="2">+ 2° turno</button>' : '') + '</div></div>';
@@ -473,6 +473,28 @@ function listaLineas(modo) {
 function barraFiltro() {
   var P = [['todos', 'Todos'], ['pendiente', 'Pendientes'], ['proceso', 'En proceso'], ['completo', 'Completos']];
   return '<div class="pills">' + P.map(function (p) { return '<button data-e="' + p[0] + '" class="' + (S.estado === p[0] ? 'on' : '') + '">' + p[1] + '</button>'; }).join('') + '</div><div class="bar"><label class="f" style="flex:1"><span>Buscar</span><input id="q" placeholder="Código, descripción o proveedor" value="' + esc(S.q) + '"></label></div><div id="lista">';
+}
+var PERS_MIN = 2, PERS_MAX = 3;   /* trabajadores del proveedor por máquina (debe coincidir con Code.gs) */
+PAG.personal = function () {
+  var R = S.v.personal || [], e = ed('personal') && esAdmin(), tp = S.planta === 'TODAS' ? [C('Planta', 'planta')] : [];
+  var tot = R.reduce(function (s, r) { return s + r.cantidad; }, 0), dias = {}, prov = {};
+  R.forEach(function (r) { dias[r.fecha] = 1; prov[r.proveedor] = (prov[r.proveedor] || 0) + r.cantidad; });
+  var kpi = '<div class="grid two" style="margin-bottom:14px"><div class="card"><small class="pu">Trabajadores-día registrados</small><div class="big">' + fn(tot) + '</div><div class="ds">' + R.length + ' máquinas-día · ' + Object.keys(dias).length + ' día(s) · promedio ' + (R.length ? (tot / R.length).toFixed(1) : '0') + ' por máquina</div></div>' +
+    '<div class="card"><small class="pu">Por proveedor</small>' + (Object.keys(prov).length ? Object.keys(prov).sort().map(function (k) { return '<div class="ds"><b>' + esc(k) + '</b> · ' + fn(prov[k]) + ' trabajadores-día</div>'; }).join('') : '<div class="ds">Sin datos en el rango.</div>') + '</div></div>';
+  var cols = tp.concat([C('Fecha', 'fecha', { f: function (r) { return verFecha(r.fecha); }, v: function (r) { return verFecha(r.fecha); } }), C('Proveedor', 'proveedor'), C('Máquina', 'maquina'), C('Trabajadores', 'cantidad', { n: 1 }), C('Registrado por', 'usuario')]);
+  if (e) cols.push({ t: '', p: 1, f: function (r) { return '<button class="btn ghost sm" data-a="eper" data-id="' + r.id + '">Editar</button> <button class="btn red sm" data-a="bper" data-id="' + r.id + '">✕</button>'; } });
+  return kpi + (e ? '<div class="bar"><button class="btn" data-a="nper">' + ic('plus') + ' Registrar personal</button></div>' : (esAdmin() ? '<p class="pu">Elige una planta para registrar personal.</p>' : '')) +
+    '<p class="pu">Por máquina: mínimo ' + PERS_MIN + ' y máximo ' + PERS_MAX + ' trabajadores del proveedor. Solo el administrador registra y edita.</p>' + tabla(cols, R, { exp: 'personal', titulo: 'Personal de proveedores por máquina', vacio: 'No hay personal registrado en este rango.' });
+};
+function formPersonal(r) {
+  r = r || { fecha: (S.d && S.d.hoy) || '', proveedor: '', maquina: '', cantidad: PERS_MIN };
+  var provs = (S.v.proveedores || []).slice().sort(), maqs = {};
+  (S.v.personal || []).forEach(function (x) { if (x.planta === S.planta) maqs[x.maquina] = 1; });
+  modal(r.id ? 'Editar personal' : 'Registrar personal · ' + S.planta,
+    campo('Fecha', 'fecha', r.fecha, 'type="date" required') + sel('Proveedor', 'proveedor', provs, r.proveedor) +
+    '<datalist id="dlm">' + Object.keys(maqs).sort().map(function (m) { return '<option value="' + esc(m) + '">'; }).join('') + '</datalist>' + campo('Máquina (ej. Máquina 1)', 'maquina', r.maquina, 'required list="dlm"') +
+    sel('Trabajadores del proveedor en esta máquina', 'cantidad', [PERS_MIN, PERS_MAX].map(function (n) { return [String(n), n + ' personas']; }), String(r.cantidad)),
+    function (o) { if (r.id) o.id = r.id; return reg('guardarPersonal', o, 'Personal guardado.'); });
 }
 PAG.armado = function () { return barraFiltro() + listaLineas('armado') + '</div>'; };
 PAG.entregas = function () { return barraFiltro() + listaLineas('entregas') + '</div>'; };
@@ -543,7 +565,7 @@ PAG.usuarios = function () {
   var h = '';
   if (ver('usuarios')) {
     h += '<div class="bar"><button class="btn" data-a="nuser">' + ic('plus') + ' Nuevo usuario</button></div>' + tabla([C('Usuario', 'usuario'), C('Nombre', 'nombre'), C('Rol', 'rol', { f: function (u) { return chip(esc(u.rol), 'info'); } }),
-      C('Plantas', 'plantas', { f: function (u) { return (u.rol === 'administrador' || u.plantas === 'TODAS') ? chip('TODAS', 'ok') : u.plantas.split(',').map(function (p) { return chip(esc(p), 'gray'); }).join(' '); } }), C('Activo', 'activo', { f: function (u) { return u.activo ? 'Sí' : 'No'; } }),
+      C('Plantas', 'plantas', { f: function (u) { return (u.rol === 'administrador' || u.plantas === 'TODAS') ? chip('TODAS', 'ok') : u.plantas.split(',').map(function (p) { return chip(esc(p), 'gray'); }).join(' '); } }), C('Módulos', 'modulos', { f: function (u) { return u.rol === 'administrador' ? chip('Todos', 'ok') : (u.modulos ? u.modulos.split(',').map(function (m) { return chip(esc(MODS_USU[m] || m), 'gray'); }).join(' ') : '<span class="pu">Según su rol</span>'); }, v: function (u) { return u.rol === 'administrador' ? 'Todos' : (u.modulos || 'Según su rol'); } }), C('Activo', 'activo', { f: function (u) { return u.activo ? 'Sí' : 'No'; } }),
       { t: '', p: 1, f: function (u) { return '<button class="btn ghost sm" data-a="euser" data-u="' + esc(u.usuario) + '">Editar</button>'; } }], S.v.usuarios || [], { exp: 'users', titulo: 'Usuarios' });
     if (S.planta !== 'TODAS') h += '<h3 style="margin:18px 0 10px">Ubicaciones · ' + esc(nomPlanta(S.planta)) + '</h3><div class="bar"><button class="btn" data-a="nubi">' + ic('pin') + ' Nueva ubicación</button></div>' +
       tabla([C('Código', 'codigo'), C('Nombre', 'nombre'), C('Activa', 'activo', { f: function (u) { return u.activo ? 'Sí' : 'No'; } }), { t: '', p: 1, f: function (u) { return '<button class="btn ghost sm" data-a="eubi" data-id="' + u.id + '">Editar</button>'; } }], (S.v.ubicaciones || []).filter(function (u) { return u.planta === S.planta; }), { vacio: 'Aún no hay ubicaciones en esta planta.' });
@@ -620,10 +642,9 @@ function formArmado(id) {
   modal('Registrar armado · ' + l.codigo, '<div class="calc">' + esc(l.descripcion) + '<br>Pendiente: ' + ppHtml(l.pendiente, l.capacidad) + ' (' + fn(l.pendiente) + ' un.)</div>' + ppCampos() + sel('Ubicación del armado', 'ubicacion', opcUbi(), '') + campo('Observaciones', 'observaciones', ''), function (o) {
     var c = cantDe(o, l.capacidad);
     if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
-    if (c > l.pendiente + 0.001) { toast('Excede el pendiente (' + fn(l.pendiente) + ' un.).', 1); return false; }
     return reg('armado', { lineaId: l.id, fecha: l.fecha, codigo: l.codigo, ph: o.ph, puchos: o.puchos, ubicacion: o.ubicacion, observaciones: o.observaciones }, 'Armado registrado.');
   });
-  bindPP($('mf'), function () { return l.capacidad; }, function (c) { return 'Quedaría pendiente: ' + ppHtml(Math.max(0, l.pendiente - c), l.capacidad); });
+  bindPP($('mf'), function () { return l.capacidad; }, function (c) { return c > l.pendiente + 0.001 ? 'Supera el pendiente por ' + ppHtml(r2(c - l.pendiente), l.capacidad) + ' · se registrará igual' : 'Quedaría pendiente: ' + ppHtml(Math.max(0, l.pendiente - c), l.capacidad); });
 }
 function formEntrega(id, turno) {
   var l = S.v.lineas.filter(function (x) { return x.id === id; })[0]; if (!l) return;
@@ -695,13 +716,15 @@ function formProducto(p) {
     '<div class="r2">' + campo('Unidades por pallet', 'capacidad_pallet', p.capacidad, 'type="number" min="1" step="any" required') + campo('Stock mínimo', 'stock_minimo', p.minimo, 'type="number" min="0" step="any"') + '</div>' + campo('Adicional habitual', 'adicional_habitual', p.adicional, 'type="number" min="0" step="any"') + sel('Estado', 'activo', [['true', 'Activo'], ['false', 'Inactivo']], String(p.activo)),
     function (o) { if (p.id) o.id = p.id; return reg('guardarProducto', o, 'Producto guardado.'); });
 }
+var MODS_USU = { programacion: 'Programación', armado: 'Armado', entregas: 'Entregas', almacen: 'Almacén', productos: 'Productos', importar: 'Importar', reportes: 'Reportes', personal: 'Personal', auditoria: 'Auditoría' };
 function formUsuario(u) {
-  u = u || { usuario: '', nombre: '', rol: 'operario', activo: true, plantas: '' };
+  u = u || { usuario: '', nombre: '', rol: 'operario', activo: true, plantas: '', modulos: '' };
   var nuevo = !u.usuario, mias = u.plantas === 'TODAS' || u.rol === 'administrador' ? ['TODAS'] : String(u.plantas).split(',');
   var ck = '<div class="f"><span>Plantas que puede usar y ver</span></div><div class="ck">' + [{ codigo: 'TODAS', nombre: 'Todas' }].concat(S.plantas).map(function (p) { return '<label><input type="checkbox" name="plantas" value="' + p.codigo + '"' + (mias.indexOf(p.codigo) > -1 ? ' checked' : '') + '> ' + p.codigo + '</label>'; }).join('') + '</div>';
   modal(nuevo ? 'Nuevo usuario' : 'Editar usuario', campo('Usuario', 'usuario', u.usuario, nuevo ? 'required autocapitalize="none"' : 'readonly') + campo('Nombre', 'nombre', u.nombre, 'required') + sel('Rol', 'rol', ['administrador', 'supervisor', 'almacenero', 'operario'], u.rol) + ck +
+    '<div class="f"><span>Módulos que verá este usuario</span></div><div class="ck">' + Object.keys(MODS_USU).map(function (m) { return '<label><input type="checkbox" name="modulos" value="' + m + '"' + (String(u.modulos || '').split(',').indexOf(m) > -1 ? ' checked' : '') + '> ' + MODS_USU[m] + '</label>'; }).join('') + '</div><p class="pu">Si no marcas ninguno, verá los módulos que corresponden a su rol. Si marcas alguno, solo verá esos (más el Dashboard). Registrar o editar sigue dependiendo de su rol.</p>' +
     sel('Estado', 'activo', [['true', 'Activo'], ['false', 'Inactivo']], String(u.activo)) + campo(nuevo ? 'Clave temporal (mín. 8)' : 'Nueva clave (vacío = no cambiar)', 'clave', '', 'type="password" autocomplete="new-password"' + (nuevo ? ' required' : '')) + '<p class="pu">El administrador siempre ve todas las plantas.</p>',
-    function (o) { o.plantas = [].concat(o.plantas || []); return reg('guardarUsuario', o, 'Usuario guardado.'); });
+    function (o) { o.plantas = [].concat(o.plantas || []); o.modulos = [].concat(o.modulos || []); return reg('guardarUsuario', o, 'Usuario guardado.'); });
 }
 function formUbi(u) {
   u = u || { codigo: '', nombre: '', activo: true };
@@ -805,6 +828,8 @@ document.addEventListener('click', function (e) {
     mov: function () { formMov(b.dataset.t); }, nmerma: formMerma, nlote: formLote, najuste: formAjuste,
     nprod: function () { formProducto(); }, eprod: function () { formProducto(S.v.productos.filter(function (p) { return p.id === id; })[0]); },
     nuser: function () { formUsuario(); }, euser: function () { formUsuario(S.v.usuarios.filter(function (u) { return u.usuario === b.dataset.u; })[0]); },
+    nper: function () { formPersonal(); }, eper: function () { formPersonal(S.v.personal.filter(function (r) { return r.id === id; })[0]); },
+    bper: function () { if (confirm('¿Eliminar este registro de personal?')) reg('eliminarPersonal', { id: id }, 'Registro eliminado.'); },
     nubi: function () { formUbi(); }, eubi: function () { formUbi(S.v.ubicaciones.filter(function (u) { return u.id === id; })[0]); },
     confimp: confirmarImport,
     sincro: function () { sincronizar().then(function () { cargar('Sincronizado'); modalPend(); }); },
