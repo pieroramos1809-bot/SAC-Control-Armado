@@ -1,4 +1,3 @@
-
 /* SAC · Control de Armado de Cajas — App (PWA) v2
    Funciona sin internet: guarda lo que registras y lo envía al servidor (Apps Script) cuando vuelve la conexión. */
 (function () {
@@ -168,7 +167,17 @@ function cargar(msg) {
     if (msg && r.ok) toast(msg);
   });
 }
-
+/* Datos mostrados = datos del servidor + lo que está pendiente de enviar */
+function derivar() {
+  if (!S.d) { S.v = null; return; }
+  var v = JSON.parse(JSON.stringify(S.d));
+  v.lineas.forEach(function (l) { l._p = 0; });
+  pendientes().forEach(function (o) { if (S.planta === 'TODAS' || o.datos.planta === S.planta) aplicarOp(v, o); });
+  v.lineas.forEach(enr);
+  S.v = v;
+}
+function enr(l) {
+  l.entregado = r2(l.t1 + l.t2);
   l.pendiente = l.cancelada ? 0 : Math.max(0, r2(l.porArmar - l.armado));
   l.saldo = l.cancelada ? Math.max(0, r2(l.armado - l.entregado)) : Math.max(0, r2(l.porArmar - l.entregado));
   l.avance = l.porArmar > 0 ? Math.min(100, Math.round(l.armado / l.porArmar * 100)) : (l.armado > 0 ? 100 : 0);
@@ -349,7 +358,6 @@ function selPlanta() {
   if (S.plantas.length > 1) op.push('<option value="TODAS"' + (S.planta === 'TODAS' ? ' selected' : '') + '>TODAS · Mis plantas</option>');
   return '<select id="planta" style="width:auto;max-width:260px;font-weight:700" aria-label="Planta">' + op.join('') + '</select>';
 }
-
 function render() {
   if (!S.token) return vistaLogin('');
   var pags = PAGINAS.filter(function (p) { return ver(p.id); });
@@ -410,7 +418,7 @@ PAG.dashboard = function () {
   var pa = sm('porArmar'), ar = sm('armado'), pc = pa > 0 ? Math.min(100, Math.round(Math.min(ar, pa) / pa * 100)) : 0;
   var bajos = (S.v.stock || []).filter(function (s) { return s.bajo; });
   var kp = [['b-az', 'calendar', 'Líneas programadas', L.length], ['b-vi', 'box', 'Por armar (un)', fn(pa)], ['b-na', 'box', 'Pallets completos', fn(sm('ph')) + ' <span class="pu" style="font-size:13px">PH</span>'], ['b-az', 'tag', 'Puchos (un. sueltas)', fn(sm('puchos'))],
-    ['b-ve', 'check', 'Armado (un)', fn(ar)], ['b-ro', 'alert', 'Pendiente (un)', fn(sm('pendiente))], ['b-az', 'truck', 'Entregado 1° turno', fn(sm('t1'))], ['b-vi', 'truck', 'Entregado 2° turno', fn(sm('t2'))]];
+    ['b-ve', 'check', 'Armado (un)', fn(ar)], ['b-ro', 'alert', 'Pendiente (un)', fn(sm('pendiente'))], ['b-az', 'truck', 'Entregado 1° turno', fn(sm('t1'))], ['b-vi', 'truck', 'Entregado 2° turno', fn(sm('t2'))]];
   if (S.v.stock) kp.push(['b-na', 'warehouse', 'Productos con stock bajo', bajos.length]);
   var dias = {}; L.forEach(function (l) { var k = l.fecha; dias[k] = dias[k] || { l: verFecha(k).slice(0, 5), a: 0, x: 0 }; dias[k].a += l.porArmar; dias[k].x += l.armado; });
   var dd = Object.keys(dias).sort().slice(-10).map(function (k) { return dias[k]; });
@@ -430,21 +438,21 @@ function colsLinea() {
     C('Programa', 'programa', { n: 1 }), C('Nec. temporal', 'nec', { n: 1 }), C('Adicional', 'adicional', { n: 1 }), C('Total', 'total', { n: 1 }), C('Stock', 'stock', { n: 1 }),
     C('Por armar (un)', 'porArmar', { n: 1, f: function (l) { return '<b>' + fn(l.porArmar) + '</b>'; } }),
     P(C('PH + puchos', 'porArmar', { f: function (l) { return ppHtml(l.porArmar, l.capacidad); } })), X(C('PH completos', 'ph', { n: 1 })), X(C('Puchos (un)', 'puchos', { n: 1 })),
-
     C('Pallets (con pucho)', 'pallets', { n: 1, f: function (l) { return l.capacidad > 0 ? fn(l.pallets) : chip('sin capacidad', 'bad'); } }),
     X(C('Armado (un)', 'armado', { n: 1 })), X(C('Pendiente (un)', 'pendiente', { n: 1 })), X(C('Entregado T1', 't1', { n: 1 })), X(C('Entregado T2', 't2', { n: 1 })),
     C('Estado', 'estado', { f: function (l) { return tagEstado(l.estado); }, v: function (l) { return ESTADOS[l.estado]; } }), C('Retiro / motivo', 'motivoCancelacion', { f: function (l) { return l.cancelada ? fn(l.cantidadCancelada) + ' un. · ' + esc(l.motivoCancelacion) : '—'; } })]);
 }
 PAG.programacion = function () {
+  var P = function (c) { c.p = 1; return c; };   // CORRECCIÓN: P solo existía dentro de colsLinea() y aquí daba «P is not defined»
   var e = ed('programacion'), cols = colsLinea();
-  cols.push({ p: 1, t: '', f: function (l) {
+  cols.push(P({ t: '', f: function (l) {
     var acciones = '<button class="btn ghost sm" data-a="traza" data-id="' + l.id + '">Traza</button>';
     if (e && !l.cancelada) acciones += ' <button class="btn ghost sm" data-a="elinea" data-id="' + l.id + '">Editar</button>';
     if (esAdmin() && !l.cancelada && l.pendiente > 0) acciones += ' <button class="btn red sm" data-a="cancela" data-id="' + l.id + '">Retirar</button>';
     if (e && !l.cancelada && l.armado <= 0 && l.entregado <= 0) acciones += ' <button class="btn red sm" data-a="blinea" data-id="' + l.id + '">✕</button>';
     if (l.cancelada) acciones += ' <span class="chip c-cancelada">Retirada</span>';
     return acciones;
-  } });
+  } }));
   return '<div class="bar">' + (e ? '<button class="btn" data-a="nlinea">' + ic('plus') + ' Nueva línea</button>' : '') + '</div>' + tabla(cols, S.v.lineas, { exp: 'prog', titulo: 'Programación de armado' });
 };
 function listaLineas(modo) {
@@ -511,7 +519,6 @@ function agrupar(g) {
   cols = cols.concat([C('Líneas', 'lineas', { n: 1 }), C('Por armar (un)', 'porArmar', { n: 1 })]);
   if (g === 'producto') cols.push({ t: 'PH completos', n: 1, f: function (o) { return fn(split(o.porArmar, o.cap).ph); }, v: function (o) { return split(o.porArmar, o.cap).ph; } }, { t: 'Puchos (un)', n: 1, f: function (o) { return fn(split(o.porArmar, o.cap).pu); }, v: function (o) { return split(o.porArmar, o.cap).pu; } });
   cols = cols.concat([C('Pallets (con pucho)', 'pallets', { n: 1 }), C('Armado (un)', 'armado', { n: 1 }), C('Pendiente (un)', 'pendiente', { n: 1 }), C('Entregado T1', 't1', { n: 1 }), C('Entregado T2', 't2', { n: 1 })]);
-
   return { titulo: 'Resumen por ' + { dia: 'día', proveedor: 'proveedor', producto: 'producto', planta: 'planta' }[g], cols: cols, filas: filas };
 }
 PAG.reportes = function () {
@@ -592,88 +599,6 @@ function formCancelar(id) {
     '<div class="warn">La programación y su historial no se borrarán. Se bloquearán nuevos armados y entregas para esta línea.</div>' +
     campo('Motivo del retiro (obligatorio)', 'motivo', '', 'required minlength="5"');
   modal('Retirar programación · ' + l.codigo, resumen, function (o) {
-
-  f.codigo.addEventListener('change', function () { $('lhelp').innerHTML = 'Stock no asignado disponible: <b>' + fn(stockDe(f.codigo.value).noAsignado) + '</b>'; up(); }); f.codigo.dispatchEvent(new Event('change'));
-}
-function formAjuste() {
-  modal('Ajuste de inventario · ' + S.planta, '<div class="warn">Solo administrador. Requiere internet y queda en la auditoría.</div>' + sel('Producto', 'codigo', opcProd(), '') + sel('Ámbito', 'ambito', [['stock', 'Solo stock general'], ['lote', 'Solo un lote'], ['ambos', 'Stock y lote']], 'stock') +
-    '<label class="f"><span>Lote (si aplica)</span><select name="loteId" id="alote"></select></label>' + campo('Ajuste en unidades (+ suma / − resta)', 'delta', '', 'type="number" step="any" required') + campo('Motivo (obligatorio)', 'motivo', '', 'required minlength="5"'),
-    function (o) { return reg('ajuste', o, 'Ajuste registrado.'); });
-  var f = $('mf');
-  function act() { $('alote').innerHTML = '<option value="">—</option>' + (S.v.lotes || []).filter(function (l) { return l.planta === S.planta && l.codigo === f.codigo.value; }).map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.lote) + ' · disp. ' + fn(l.cant_disp) + '</option>'; }).join(''); }
-  f.codigo.addEventListener('change', act); act();
-}
-function formProducto(p) {
-  p = p || { codigo: '', descripcion: '', proveedor: '', capacidad: '', minimo: 0, adicional: 0, activo: true };
-  modal(p.id ? 'Editar producto' : 'Nuevo producto', '<datalist id="dlv">' + S.v.proveedores.map(function (v) { return '<option value="' + esc(v) + '">'; }).join('') + '</datalist>' + campo('Código', 'codigo', p.codigo, 'required') + campo('Descripción', 'descripcion', p.descripcion, 'required') + campo('Proveedor', 'proveedor', p.proveedor, 'list="dlv"') +
-    '<div class="r2">' + campo('Unidades por pallet', 'capacidad_pallet', p.capacidad, 'type="number" min="1" step="any" required') + campo('Stock mínimo', 'stock_minimo', p.minimo, 'type="number" min="0" step="any"') + '</div>' + campo('Adicional habitual', 'adicional_habitual', p.adicional, 'type="number" min="0" step="any"') + sel('Estado', 'activo', [['true', 'Activo'], ['false', 'Inactivo']], String(p.activo)),
-    function (o) { if (p.id) o.id = p.id; return reg('guardarProducto', o, 'Producto guardado.'); });
-}
-function formUsuario(u) {
-  u = u || { usuario: '', nombre: '', rol: 'operario', activo: true, plantas: '' };
-  var nuevo = !u.usuario, mias = u.plantas === 'TODAS' || u.rol === 'administrador' ? ['TODAS'] : String(u.plantas).split(',');
-  var ck = '<div class="f"><span>Plantas que puede usar y ver</span></div><div class="ck">' + [{ codigo: 'TODAS', nombre: 'Todas' }].concat(S.plantas).map(function (p) { return '<label><input type="checkbox" name="plantas" value="' + p.codigo + '"' + (mias.indexOf(p.codigo) > -1 ? ' checked' : '') + '> ' + p.codigo + '</label>'; }).join('') + '</div>';
-  modal(nuevo ? 'Nuevo usuario' : 'Editar usuario', campo('Usuario', 'usuario', u.usuario, nuevo ? 'required autocapitalize="none"' : 'readonly') + campo('Nombre', 'nombre', u.nombre, 'required') + sel('Rol', 'rol', ['administrador', 'supervisor', 'almacenero', 'operario'], u.rol) + ck +
-    sel('Estado', 'activo', [['true', 'Activo'], ['false', 'Inactivo']], String(u.activo)) + campo(nuevo ? 'Clave temporal (mín. 8)' : 'Nueva clave (vacío = no cambiar)', 'clave', '', 'type="password" autocomplete="new-password"' + (nuevo ? ' required' : '')) + '<p class="pu">El administrador siempre ve todas las plantas.</p>',
-    function (o) { o.plantas = [].concat(o.plantas || []); return reg('guardarUsuario', o, 'Usuario guardado.'); });
-}
-function formUbi(u) {
-  u = u || { codigo: '', nombre: '', activo: true };
-  modal(u.id ? 'Editar ubicación' : 'Nueva ubicación · ' + S.planta, campo('Código (ej. ERI, EDU, RACK-1)', 'codigo', u.codigo, 'required maxlength="12"') + campo('Nombre', 'nombre', u.nombre) + (u.id ? sel('Estado', 'activo', [['true', 'Activa'], ['false', 'Inactiva']], String(u.activo)) : ''),
-    function (o) { if (u.id) o.id = u.id; return reg('guardarUbicacion', o, 'Ubicación guardada.'); });
-}
-function formClave() {
-  modal('Cambiar mi clave', campo('Clave actual', 'actual', '', 'type="password" required') + campo('Nueva clave (mín. 8)', 'nueva', '', 'type="password" required'), function (o) { return reg('cambiarClave', o, 'Clave actualizada.'); });
-}
-function descOp(o) {
-  var d = o.datos, n = { armado: 'Armado', entrega: 'Entrega T' + d.turno, mover: d.tipo === 'salida' ? 'Salida' : 'Entrada', merma: 'Merma', asignarLote: 'Lote', guardarLinea: 'Programación' }[o.accion] || o.accion;
-  var q = (d.ph || d.puchos) ? ((d.ph || 0) + ' PH + ' + (d.puchos || 0)) : (d.cantidad || '');
-  return '<b>' + esc(n) + '</b> · ' + esc(d.planta) + ' · ' + esc(d.codigo || '') + (q !== '' ? ' · ' + esc(q) : '') + '<br><small class="pu">' + esc(o.ts) + (o.estado === 'error' ? ' · ❌ ' + esc(o.error) : ' · esperando envío') + '</small>';
-}
-function modalPend() {
-  var L = S.outbox;
-  modal('Registros pendientes de enviar', L.length ? '<div style="display:grid;gap:8px;margin-bottom:10px">' + L.map(function (o) { return '<div class="card" style="padding:10px;display:flex;justify-content:space-between;gap:10px;align-items:center"><div>' + descOp(o) + '</div><button type="button" class="btn ghost sm" data-a="desc" data-id="' + o.opId + '">Descartar</button></div>'; }).join('') + '</div>' + (online() ? '<button type="button" class="btn" data-a="sincro">' + ic('refresh') + ' Enviar ahora</button>' : '<div class="warn">Sin conexión: se enviarán solos cuando vuelva internet.</div>') : '<p class="pu">No hay nada pendiente. Todo está sincronizado. ✅</p>');
-}
-function modalMas() {
-  var ocultos = PAGINAS.filter(function (p) { return ver(p.id); });
-  modal('Menú', '<div style="display:grid;gap:8px">' + ocultos.map(function (p) { return '<button type="button" class="btn ghost" data-p="' + p.id + '" style="justify-content:flex-start">' + ic(p.i) + p.t + '</button>'; }).join('') +
-    '<button type="button" class="btn ghost" data-a="clave" style="justify-content:flex-start">' + ic('users') + ' Cambiar mi clave</button><button type="button" class="btn ghost" data-a="tema" style="justify-content:flex-start">' + ic('moon') + ' Modo claro / oscuro</button>' +
-    '<button type="button" class="btn ghost" data-a="instalar" style="justify-content:flex-start">' + ic('install') + ' Instalar app</button><button type="button" class="btn red" data-a="salir" style="justify-content:flex-start">' + ic('logout') + ' Salir</button></div>');
-}
-function modalInstalar() {
-  if (S.instalar) { S.instalar.prompt(); S.instalar = null; return; }
-  modal('Instalar la app', '<p>Así queda como una app más en tu equipo, con su ícono, y abre aunque no haya internet:</p><ul><li><b>Android (Chrome):</b> menú ⋮ ▸ <i>Instalar app</i> o <i>Agregar a pantalla principal</i>.</li><li><b>iPhone / iPad (Safari):</b> botón Compartir ▸ <i>Agregar a inicio</i>.</li><li><b>Computadora (Chrome o Edge):</b> ícono de instalar al final de la barra de direcciones.</li></ul><p class="pu">Debes abrir primero el enlace con internet al menos una vez.</p>');
-}
-
-/* ======================= IMPORTAR EXCEL ======================= */
-function normH(s) { return String(s || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]/g, ''); }
-function aFecha(v) {
-  if (v instanceof Date) return iso(v);
-  if (typeof v === 'number') { var d = new Date(Math.round((v - 25569) * 86400000)); return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); }
-  var m = String(v || '').trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/); if (m) return (m[3].length === 2 ? '20' + m[3] : m[3]) + '-' + pad(m[2]) + '-' + pad(m[1]);
-  return /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : '';
-}
-function aNum(v) { if (typeof v === 'number') return v; var n = parseFloat(String(v || '').replace(/,/g, '')); return isNaN(n) ? 0 : n; }
-function leerExcel(buf) {
-  var wb = XLSX.read(buf, { type: 'array', cellDates: true }), ws = wb.Sheets[wb.SheetNames[0]], M = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
-  var hi = -1; for (var i = 0; i < Math.min(M.length, 15); i++) { if (M[i].some(function (c) { return normH(c) === 'CODIGO'; })) { hi = i; break; } }
-  if (hi < 0) throw new Error('No encontré una columna CODIGO en las primeras filas.');
-  var H = M[hi].map(normH), col = function () { for (var k = 0; k < arguments.length; k++) { var ix = H.indexOf(arguments[k]); if (ix > -1) return ix; } return -1; };
-  var c = { f: col('FECHA'), cod: col('CODIGO'), des: col('DESCRIPCION'), pro: col('PROGRAMA'), nec: col('NECESIDADTEMPORAL'), adi: col('ADICIONALALMACEN', 'ADICIONAL'), sto: col('STOCKALMACEN', 'STOCK'), t1: col('ENTREGADO1TURNO', 'ENTREGADO1ERTURNO', 'ENTREGADO1'), t2: col('ENTREGADO2TURNO', 'ENTREGADO2DOTURNO', 'ENTREGADO2') };
-  if (c.f < 0 && H[0] === '') c.f = 0;
-  var g = function (r, k) { return k > -1 ? r[k] : ''; }, fecha = '', filas = [];
-  for (var j = hi + 1; j < M.length; j++) {
-    var r = M[j], cod = String(g(r, c.cod)).trim(); if (!cod) continue;
-    var ff = aFecha(g(r, c.f)); if (ff) fecha = ff;
-    filas.push({ n: j + 1, fecha: fecha, codigo: cod, descripcion: g(r, c.des), programa: aNum(g(r, c.pro)), nec: aNum(g(r, c.nec)), adicional: aNum(g(r, c.adi)), stock: aNum(g(r, c.sto)), t1: aNum(g(r, c.t1)), t2: aNum(g(r, c.t2)) });
-  }
-  return filas;
-}
-function bindImportar() {
-  var inp = $('xl'); if (!inp) return;
-  inp.onchange = function (e) {
-    var file = e.target.files[0]; if (!file) return;
-
     if (String(o.motivo || '').trim().length < 5) { toast('Escribe un motivo de al menos 5 caracteres.', 1); return false; }
     return reg('cancelarLinea', { id: l.id, motivo: o.motivo }, 'Programación retirada. El armado y las entregas existentes se conservaron.');
   });
@@ -754,7 +679,86 @@ function formLote() {
       return reg('asignarLote', { codigo: o.codigo, lote: o.lote, vencimiento: o.vencimiento, ph: o.ph, puchos: o.puchos, ubicacion: o.ubicacion }, 'Lote registrado.');
     });
   var f = $('mf'), up = bindPP(f, function () { var p = prodDe(f.codigo.value); return p ? p.capacidad : 0; });
+  f.codigo.addEventListener('change', function () { $('lhelp').innerHTML = 'Stock no asignado disponible: <b>' + fn(stockDe(f.codigo.value).noAsignado) + '</b>'; up(); }); f.codigo.dispatchEvent(new Event('change'));
+}
+function formAjuste() {
+  modal('Ajuste de inventario · ' + S.planta, '<div class="warn">Solo administrador. Requiere internet y queda en la auditoría.</div>' + sel('Producto', 'codigo', opcProd(), '') + sel('Ámbito', 'ambito', [['stock', 'Solo stock general'], ['lote', 'Solo un lote'], ['ambos', 'Stock y lote']], 'stock') +
+    '<label class="f"><span>Lote (si aplica)</span><select name="loteId" id="alote"></select></label>' + campo('Ajuste en unidades (+ suma / − resta)', 'delta', '', 'type="number" step="any" required') + campo('Motivo (obligatorio)', 'motivo', '', 'required minlength="5"'),
+    function (o) { return reg('ajuste', o, 'Ajuste registrado.'); });
+  var f = $('mf');
+  function act() { $('alote').innerHTML = '<option value="">—</option>' + (S.v.lotes || []).filter(function (l) { return l.planta === S.planta && l.codigo === f.codigo.value; }).map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.lote) + ' · disp. ' + fn(l.cant_disp) + '</option>'; }).join(''); }
+  f.codigo.addEventListener('change', act); act();
+}
+function formProducto(p) {
+  p = p || { codigo: '', descripcion: '', proveedor: '', capacidad: '', minimo: 0, adicional: 0, activo: true };
+  modal(p.id ? 'Editar producto' : 'Nuevo producto', '<datalist id="dlv">' + S.v.proveedores.map(function (v) { return '<option value="' + esc(v) + '">'; }).join('') + '</datalist>' + campo('Código', 'codigo', p.codigo, 'required') + campo('Descripción', 'descripcion', p.descripcion, 'required') + campo('Proveedor', 'proveedor', p.proveedor, 'list="dlv"') +
+    '<div class="r2">' + campo('Unidades por pallet', 'capacidad_pallet', p.capacidad, 'type="number" min="1" step="any" required') + campo('Stock mínimo', 'stock_minimo', p.minimo, 'type="number" min="0" step="any"') + '</div>' + campo('Adicional habitual', 'adicional_habitual', p.adicional, 'type="number" min="0" step="any"') + sel('Estado', 'activo', [['true', 'Activo'], ['false', 'Inactivo']], String(p.activo)),
+    function (o) { if (p.id) o.id = p.id; return reg('guardarProducto', o, 'Producto guardado.'); });
+}
+function formUsuario(u) {
+  u = u || { usuario: '', nombre: '', rol: 'operario', activo: true, plantas: '' };
+  var nuevo = !u.usuario, mias = u.plantas === 'TODAS' || u.rol === 'administrador' ? ['TODAS'] : String(u.plantas).split(',');
+  var ck = '<div class="f"><span>Plantas que puede usar y ver</span></div><div class="ck">' + [{ codigo: 'TODAS', nombre: 'Todas' }].concat(S.plantas).map(function (p) { return '<label><input type="checkbox" name="plantas" value="' + p.codigo + '"' + (mias.indexOf(p.codigo) > -1 ? ' checked' : '') + '> ' + p.codigo + '</label>'; }).join('') + '</div>';
+  modal(nuevo ? 'Nuevo usuario' : 'Editar usuario', campo('Usuario', 'usuario', u.usuario, nuevo ? 'required autocapitalize="none"' : 'readonly') + campo('Nombre', 'nombre', u.nombre, 'required') + sel('Rol', 'rol', ['administrador', 'supervisor', 'almacenero', 'operario'], u.rol) + ck +
+    sel('Estado', 'activo', [['true', 'Activo'], ['false', 'Inactivo']], String(u.activo)) + campo(nuevo ? 'Clave temporal (mín. 8)' : 'Nueva clave (vacío = no cambiar)', 'clave', '', 'type="password" autocomplete="new-password"' + (nuevo ? ' required' : '')) + '<p class="pu">El administrador siempre ve todas las plantas.</p>',
+    function (o) { o.plantas = [].concat(o.plantas || []); return reg('guardarUsuario', o, 'Usuario guardado.'); });
+}
+function formUbi(u) {
+  u = u || { codigo: '', nombre: '', activo: true };
+  modal(u.id ? 'Editar ubicación' : 'Nueva ubicación · ' + S.planta, campo('Código (ej. ERI, EDU, RACK-1)', 'codigo', u.codigo, 'required maxlength="12"') + campo('Nombre', 'nombre', u.nombre) + (u.id ? sel('Estado', 'activo', [['true', 'Activa'], ['false', 'Inactiva']], String(u.activo)) : ''),
+    function (o) { if (u.id) o.id = u.id; return reg('guardarUbicacion', o, 'Ubicación guardada.'); });
+}
+function formClave() {
+  modal('Cambiar mi clave', campo('Clave actual', 'actual', '', 'type="password" required') + campo('Nueva clave (mín. 8)', 'nueva', '', 'type="password" required'), function (o) { return reg('cambiarClave', o, 'Clave actualizada.'); });
+}
+function descOp(o) {
+  var d = o.datos, n = { armado: 'Armado', entrega: 'Entrega T' + d.turno, mover: d.tipo === 'salida' ? 'Salida' : 'Entrada', merma: 'Merma', asignarLote: 'Lote', guardarLinea: 'Programación' }[o.accion] || o.accion;
+  var q = (d.ph || d.puchos) ? ((d.ph || 0) + ' PH + ' + (d.puchos || 0)) : (d.cantidad || '');
+  return '<b>' + esc(n) + '</b> · ' + esc(d.planta) + ' · ' + esc(d.codigo || '') + (q !== '' ? ' · ' + esc(q) : '') + '<br><small class="pu">' + esc(o.ts) + (o.estado === 'error' ? ' · ❌ ' + esc(o.error) : ' · esperando envío') + '</small>';
+}
+function modalPend() {
+  var L = S.outbox;
+  modal('Registros pendientes de enviar', L.length ? '<div style="display:grid;gap:8px;margin-bottom:10px">' + L.map(function (o) { return '<div class="card" style="padding:10px;display:flex;justify-content:space-between;gap:10px;align-items:center"><div>' + descOp(o) + '</div><button type="button" class="btn ghost sm" data-a="desc" data-id="' + o.opId + '">Descartar</button></div>'; }).join('') + '</div>' + (online() ? '<button type="button" class="btn" data-a="sincro">' + ic('refresh') + ' Enviar ahora</button>' : '<div class="warn">Sin conexión: se enviarán solos cuando vuelva internet.</div>') : '<p class="pu">No hay nada pendiente. Todo está sincronizado. ✅</p>');
+}
+function modalMas() {
+  var ocultos = PAGINAS.filter(function (p) { return ver(p.id); });
+  modal('Menú', '<div style="display:grid;gap:8px">' + ocultos.map(function (p) { return '<button type="button" class="btn ghost" data-p="' + p.id + '" style="justify-content:flex-start">' + ic(p.i) + p.t + '</button>'; }).join('') +
+    '<button type="button" class="btn ghost" data-a="clave" style="justify-content:flex-start">' + ic('users') + ' Cambiar mi clave</button><button type="button" class="btn ghost" data-a="tema" style="justify-content:flex-start">' + ic('moon') + ' Modo claro / oscuro</button>' +
+    '<button type="button" class="btn ghost" data-a="instalar" style="justify-content:flex-start">' + ic('install') + ' Instalar app</button><button type="button" class="btn red" data-a="salir" style="justify-content:flex-start">' + ic('logout') + ' Salir</button></div>');
+}
+function modalInstalar() {
+  if (S.instalar) { S.instalar.prompt(); S.instalar = null; return; }
+  modal('Instalar la app', '<p>Así queda como una app más en tu equipo, con su ícono, y abre aunque no haya internet:</p><ul><li><b>Android (Chrome):</b> menú ⋮ ▸ <i>Instalar app</i> o <i>Agregar a pantalla principal</i>.</li><li><b>iPhone / iPad (Safari):</b> botón Compartir ▸ <i>Agregar a inicio</i>.</li><li><b>Computadora (Chrome o Edge):</b> ícono de instalar al final de la barra de direcciones.</li></ul><p class="pu">Debes abrir primero el enlace con internet al menos una vez.</p>');
+}
 
+/* ======================= IMPORTAR EXCEL ======================= */
+function normH(s) { return String(s || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Z0-9]/g, ''); }
+function aFecha(v) {
+  if (v instanceof Date) return iso(v);
+  if (typeof v === 'number') { var d = new Date(Math.round((v - 25569) * 86400000)); return d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()); }
+  var m = String(v || '').trim().match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/); if (m) return (m[3].length === 2 ? '20' + m[3] : m[3]) + '-' + pad(m[2]) + '-' + pad(m[1]);
+  return /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? String(v).slice(0, 10) : '';
+}
+function aNum(v) { if (typeof v === 'number') return v; var n = parseFloat(String(v || '').replace(/,/g, '')); return isNaN(n) ? 0 : n; }
+function leerExcel(buf) {
+  var wb = XLSX.read(buf, { type: 'array', cellDates: true }), ws = wb.Sheets[wb.SheetNames[0]], M = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: true });
+  var hi = -1; for (var i = 0; i < Math.min(M.length, 15); i++) { if (M[i].some(function (c) { return normH(c) === 'CODIGO'; })) { hi = i; break; } }
+  if (hi < 0) throw new Error('No encontré una columna CODIGO en las primeras filas.');
+  var H = M[hi].map(normH), col = function () { for (var k = 0; k < arguments.length; k++) { var ix = H.indexOf(arguments[k]); if (ix > -1) return ix; } return -1; };
+  var c = { f: col('FECHA'), cod: col('CODIGO'), des: col('DESCRIPCION'), pro: col('PROGRAMA'), nec: col('NECESIDADTEMPORAL'), adi: col('ADICIONALALMACEN', 'ADICIONAL'), sto: col('STOCKALMACEN', 'STOCK'), t1: col('ENTREGADO1TURNO', 'ENTREGADO1ERTURNO', 'ENTREGADO1'), t2: col('ENTREGADO2TURNO', 'ENTREGADO2DOTURNO', 'ENTREGADO2') };
+  if (c.f < 0 && H[0] === '') c.f = 0;
+  var g = function (r, k) { return k > -1 ? r[k] : ''; }, fecha = '', filas = [];
+  for (var j = hi + 1; j < M.length; j++) {
+    var r = M[j], cod = String(g(r, c.cod)).trim(); if (!cod) continue;
+    var ff = aFecha(g(r, c.f)); if (ff) fecha = ff;
+    filas.push({ n: j + 1, fecha: fecha, codigo: cod, descripcion: g(r, c.des), programa: aNum(g(r, c.pro)), nec: aNum(g(r, c.nec)), adicional: aNum(g(r, c.adi)), stock: aNum(g(r, c.sto)), t1: aNum(g(r, c.t1)), t2: aNum(g(r, c.t2)) });
+  }
+  return filas;
+}
+function bindImportar() {
+  var inp = $('xl'); if (!inp) return;
+  inp.onchange = function (e) {
+    var file = e.target.files[0]; if (!file) return;
     var rd = new FileReader();
     rd.onload = function (ev) {
       try {
