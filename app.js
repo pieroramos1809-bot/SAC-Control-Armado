@@ -87,7 +87,7 @@ var PAGINAS = [
   { id: 'entregas', t: 'Entregas', i: 'truck' }, { id: 'almacen', t: 'Almacén', i: 'warehouse' }, { id: 'productos', t: 'Productos', i: 'tag' },
   { id: 'importar', t: 'Importar', i: 'upload' }, { id: 'reportes', t: 'Reportes', i: 'chart' }, { id: 'usuarios', t: 'Administración', i: 'users' }
 ];
-var ESTADOS = { pendiente: 'Pendiente', proceso: 'En proceso', completo: 'Completo', 'sin-necesidad': 'Sin necesidad' };
+var ESTADOS = { pendiente: 'Pendiente', proceso: 'En proceso', completo: 'Completo', 'sin-necesidad': 'Sin necesidad', cancelada: 'Retirada' };
 var online = function () { return navigator.onLine !== false; };
 function ver(m) { return !!(S.perm && S.perm[m] && S.perm[m].ver); }
 function ed(m) { return !!(S.perm && S.perm[m] && S.perm[m].editar) && (S.planta !== 'TODAS' || m === 'productos' || m === 'usuarios'); }
@@ -177,9 +177,11 @@ function derivar() {
   S.v = v;
 }
 function enr(l) {
-  l.pendiente = Math.max(0, r2(l.porArmar - l.armado)); l.entregado = r2(l.t1 + l.t2); l.saldo = Math.max(0, r2(l.porArmar - l.entregado));
+  l.entregado = r2(l.t1 + l.t2);
+  l.pendiente = l.cancelada ? 0 : Math.max(0, r2(l.porArmar - l.armado));
+  l.saldo = l.cancelada ? Math.max(0, r2(l.armado - l.entregado)) : Math.max(0, r2(l.porArmar - l.entregado));
   l.avance = l.porArmar > 0 ? Math.min(100, Math.round(l.armado / l.porArmar * 100)) : (l.armado > 0 ? 100 : 0);
-  l.estado = l.porArmar <= 0 ? 'sin-necesidad' : (l.armado >= l.porArmar ? 'completo' : (l.armado > 0 ? 'proceso' : 'pendiente'));
+  l.estado = l.cancelada ? 'cancelada' : (l.porArmar <= 0 ? 'sin-necesidad' : (l.armado >= l.porArmar ? 'completo' : (l.armado > 0 ? 'proceso' : 'pendiente')));
   var s = split(l.porArmar, l.capacidad); l.ph = s.ph; l.puchos = s.pu;
 }
 function lineaDeOp(v, d) { return v.lineas.filter(function (l) { return l.planta === d.planta && (l.id === d.lineaId || (l.fecha === d.fecha && l.codigo === d.codigo)); })[0]; }
@@ -412,7 +414,7 @@ function barras(datos) {
 }
 var PAG = {};
 PAG.dashboard = function () {
-  var L = S.v.lineas, sm = function (k) { return L.reduce(function (s, l) { return s + (l[k] || 0); }, 0); };
+  var L = S.v.lineas.filter(function (l) { return !l.cancelada; }), sm = function (k) { return L.reduce(function (s, l) { return s + (l[k] || 0); }, 0); };
   var pa = sm('porArmar'), ar = sm('armado'), pc = pa > 0 ? Math.min(100, Math.round(Math.min(ar, pa) / pa * 100)) : 0;
   var bajos = (S.v.stock || []).filter(function (s) { return s.bajo; });
   var kp = [['b-az', 'calendar', 'Líneas programadas', L.length], ['b-vi', 'box', 'Por armar (un)', fn(pa)], ['b-na', 'box', 'Pallets completos', fn(sm('ph')) + ' <span class="pu" style="font-size:13px">PH</span>'], ['b-az', 'tag', 'Puchos (un. sueltas)', fn(sm('puchos'))],
@@ -438,15 +440,22 @@ function colsLinea() {
     P(C('PH + puchos', 'porArmar', { f: function (l) { return ppHtml(l.porArmar, l.capacidad); } })), X(C('PH completos', 'ph', { n: 1 })), X(C('Puchos (un)', 'puchos', { n: 1 })),
     C('Pallets (con pucho)', 'pallets', { n: 1, f: function (l) { return l.capacidad > 0 ? fn(l.pallets) : chip('sin capacidad', 'bad'); } }),
     X(C('Armado (un)', 'armado', { n: 1 })), X(C('Pendiente (un)', 'pendiente', { n: 1 })), X(C('Entregado T1', 't1', { n: 1 })), X(C('Entregado T2', 't2', { n: 1 })),
-    C('Estado', 'estado', { f: function (l) { return tagEstado(l.estado); }, v: function (l) { return ESTADOS[l.estado]; } })]);
+    C('Estado', 'estado', { f: function (l) { return tagEstado(l.estado); }, v: function (l) { return ESTADOS[l.estado]; } }), C('Retiro / motivo', 'motivoCancelacion', { f: function (l) { return l.cancelada ? fn(l.cantidadCancelada) + ' un. · ' + esc(l.motivoCancelacion) : '—'; } })]);
 }
 PAG.programacion = function () {
   var e = ed('programacion'), cols = colsLinea();
-  cols.push(P({ t: '', f: function (l) { return '<button class="btn ghost sm" data-a="traza" data-id="' + l.id + '">Traza</button> ' + (e ? '<button class="btn ghost sm" data-a="elinea" data-id="' + l.id + '">Editar</button> <button class="btn red sm" data-a="blinea" data-id="' + l.id + '">✕</button>' : ''); } }));
+  cols.push(P({ t: '', f: function (l) {
+    var acciones = '<button class="btn ghost sm" data-a="traza" data-id="' + l.id + '">Traza</button>';
+    if (e && !l.cancelada) acciones += ' <button class="btn ghost sm" data-a="elinea" data-id="' + l.id + '">Editar</button>';
+    if (esAdmin() && !l.cancelada && l.pendiente > 0) acciones += ' <button class="btn red sm" data-a="cancela" data-id="' + l.id + '">Retirar</button>';
+    if (e && !l.cancelada && l.armado <= 0 && l.entregado <= 0) acciones += ' <button class="btn red sm" data-a="blinea" data-id="' + l.id + '">✕</button>';
+    if (l.cancelada) acciones += ' <span class="chip c-cancelada">Retirada</span>';
+    return acciones;
+  } }));
   return '<div class="bar">' + (e ? '<button class="btn" data-a="nlinea">' + ic('plus') + ' Nueva línea</button>' : '') + '</div>' + tabla(cols, S.v.lineas, { exp: 'prog', titulo: 'Programación de armado' });
 };
 function listaLineas(modo) {
-  var L = S.v.lineas.filter(function (l) { return l.porArmar > 0; }), q = S.q.toLowerCase();
+  var L = S.v.lineas.filter(function (l) { return !l.cancelada ? l.porArmar > 0 : (modo === 'entregas' && l.saldo > 0); }), q = S.q.toLowerCase();
   if (S.estado !== 'todos') L = L.filter(function (l) { return l.estado === S.estado; });
   if (q) L = L.filter(function (l) { return (l.codigo + ' ' + l.descripcion + ' ' + l.proveedor).toLowerCase().indexOf(q) > -1; });
   if (!L.length) return '<div class="card empty">No hay líneas con ese filtro.</div>';
@@ -455,9 +464,9 @@ function listaLineas(modo) {
     var head = '<div class="h"><div><div class="cod">' + esc(l.codigo) + tp + '</div><div class="ds">' + esc(l.descripcion) + '</div></div>' + (l._p ? chip('por enviar', 'warn') : tagEstado(l.estado)) + '</div>';
     if (modo === 'armado') return '<div class="card ln ' + (l._p ? 'pendiente' : '') + '">' + head + '<div><small class="pu">Por armar</small><div class="big">' + ppHtml(l.porArmar, l.capacidad) + '</div><div class="ds">' + fn(l.porArmar) + ' unidades · ' + verFecha(l.fecha) + ' · ' + esc(l.proveedor) + '</div></div>' + barra(l.avance, l.avance < 100 ? 'y' : '') +
       '<div class="st"><div><small>Armado</small>' + ppHtml(l.armado, l.capacidad) + '</div><div><small>Pendiente</small>' + ppHtml(l.pendiente, l.capacidad) + '</div></div><div class="acts">' + (e && l.pendiente > 0 ? '<button class="btn" data-a="armar" data-id="' + l.id + '">' + ic('plus') + ' Registrar armado</button>' : '') + '<button class="btn ghost" data-a="traza" data-id="' + l.id + '">Historial</button></div></div>';
-    return '<div class="card ln ' + (l._p ? 'pendiente' : '') + '">' + head + '<div><small class="pu">Autorizado (por armar)</small><div class="big">' + ppHtml(l.porArmar, l.capacidad) + '</div><div class="ds">' + verFecha(l.fecha) + ' · ' + esc(l.proveedor) + '</div></div>' + barra(l.porArmar > 0 ? Math.min(100, Math.round(l.entregado / l.porArmar * 100)) : 0) +
+    return '<div class="card ln ' + (l._p ? 'pendiente' : '') + '">' + head + '<div><small class="pu">' + (l.cancelada ? 'Armado disponible para entregar' : 'Autorizado (por armar)') + '</small><div class="big">' + ppHtml(l.cancelada ? l.armado : l.porArmar, l.capacidad) + '</div><div class="ds">' + verFecha(l.fecha) + ' · ' + esc(l.proveedor) + '</div></div>' + barra((l.cancelada ? l.armado : l.porArmar) > 0 ? Math.min(100, Math.round(l.entregado / (l.cancelada ? l.armado : l.porArmar) * 100)) : 0) +
       '<div class="st"><div><small>1° turno</small>' + ppHtml(l.t1, l.capacidad) + '</div><div><small>2° turno</small>' + ppHtml(l.t2, l.capacidad) + '</div><div><small>Entregado</small>' + ppHtml(l.entregado, l.capacidad) + '</div><div><small>Saldo</small>' + ppHtml(l.saldo, l.capacidad) + '</div></div>' +
-      '<div class="acts">' + (e ? '<button class="btn" data-a="entregar" data-id="' + l.id + '" data-t="1">+ 1° turno</button><button class="btn ghost" data-a="entregar" data-id="' + l.id + '" data-t="2">+ 2° turno</button>' : '') + '</div></div>';
+      '<div class="acts">' + (e && l.saldo > 0 ? '<button class="btn" data-a="entregar" data-id="' + l.id + '" data-t="1">+ 1° turno</button><button class="btn ghost" data-a="entregar" data-id="' + l.id + '" data-t="2">+ 2° turno</button>' : '') + '</div></div>';
   }).join('') + '</div>';
 }
 function barraFiltro() {
@@ -574,6 +583,25 @@ function formLinea(l) {
   ['nec', 'adicional', 'stock', 'codigo'].forEach(function (n) { f[n].addEventListener('input', calc); });
   calc();
 }
+function formCancelar(id) {
+  var l = S.v.lineas.filter(function (x) { return x.id === id; })[0];
+  if (!l || l.cancelada) return;
+  if (!esAdmin()) return toast('Solo el administrador puede retirar programaciones.', 1);
+  if (!online()) return toast('Retirar una programación requiere conexión a internet.', 1);
+  var porCancelar = Math.max(0, r2(l.porArmar - l.armado));
+  if (!(porCancelar > 0)) return toast('No hay cantidad pendiente por armar.', 1);
+  var resumen = '<div class="calc"><b>' + esc(l.codigo) + '</b> · ' + esc(l.descripcion) +
+    '<br>Programado por armar: <b>' + fn(l.porArmar) + '</b> un.' +
+    '<br>Armado que se conservará: <b>' + fn(l.armado) + '</b> un.' +
+    '<br>Entregado que se conservará: <b>' + fn(l.entregado) + '</b> un.' +
+    '<br>Cantidad pendiente que se retirará: <b>' + fn(porCancelar) + '</b> un.</div>' +
+    '<div class="warn">La programación y su historial no se borrarán. Se bloquearán nuevos armados y entregas para esta línea.</div>' +
+    campo('Motivo del retiro (obligatorio)', 'motivo', '', 'required minlength="5"');
+  modal('Retirar programación · ' + l.codigo, resumen, function (o) {
+    if (String(o.motivo || '').trim().length < 5) { toast('Escribe un motivo de al menos 5 caracteres.', 1); return false; }
+    return reg('cancelarLinea', { id: l.id, motivo: o.motivo }, 'Programación retirada. El armado y las entregas existentes se conservaron.');
+  });
+}
 function traza(id) {
   var l = S.v.lineas.filter(function (x) { return x.id === id; })[0] || {};
   if (String(id).indexOf('tmp_') === 0) return toast('Esta línea aún no se envió al servidor.');
@@ -582,7 +610,8 @@ function traza(id) {
     if (!r.ok) return toast(r.error, 1);
     var cap = l.capacidad || 0;
     modal('Historial · ' + (l.codigo || ''), '<b>Armados</b>' + (r.armado.length ? '<ul>' + r.armado.map(function (a) { return '<li>' + verFecha(a.fecha) + ' ' + esc(a.hora.slice(0, 5)) + ' · ' + ppTxt(a.cantidad, cap) + ' (' + fn(a.cantidad) + ' un.)' + (a.ubicacion ? ' · ' + esc(a.ubicacion) : '') + ' · ' + esc(a.usuario) + (a.observaciones ? ' · ' + esc(a.observaciones) : '') + '</li>'; }).join('') + '</ul>' : '<p class="pu">Sin armados.</p>') +
-      '<b>Entregas</b>' + (r.entregas.length ? '<ul>' + r.entregas.map(function (e) { return '<li>' + verFecha(e.fecha) + ' ' + esc(e.hora.slice(0, 5)) + ' · T' + e.turno + ' · ' + ppTxt(e.cantidad, cap) + ' (' + fn(e.cantidad) + ' un.) · ' + esc(e.responsable) + (e.forzada ? ' · ⚠ excedida' : '') + '</li>'; }).join('') + '</ul>' : '<p class="pu">Sin entregas.</p>'));
+      '<b>Entregas</b>' + (r.entregas.length ? '<ul>' + r.entregas.map(function (e) { return '<li>' + verFecha(e.fecha) + ' ' + esc(e.hora.slice(0, 5)) + ' · T' + e.turno + ' · ' + ppTxt(e.cantidad, cap) + ' (' + fn(e.cantidad) + ' un.) · ' + esc(e.responsable) + (e.forzada ? ' · ⚠ excedida' : '') + '</li>'; }).join('') + '</ul>' : '<p class="pu">Sin entregas.</p>') +
+      (r.cancelacion ? '<div class="warn"><b>Programación retirada</b><br>Cantidad cancelada: ' + fn(r.cancelacion.cantidad_cancelada) + ' un.<br>Motivo: ' + esc(r.cancelacion.motivo) + '<br>Por: ' + esc(r.cancelacion.usuario) + ' · ' + esc(r.cancelacion.cuando) + '</div>' : ''));
   });
 }
 function formArmado(id) {
@@ -597,11 +626,12 @@ function formArmado(id) {
 }
 function formEntrega(id, turno) {
   var l = S.v.lineas.filter(function (x) { return x.id === id; })[0]; if (!l) return;
-  modal('Entrega ' + turno + '° turno · ' + l.codigo, '<div class="calc">' + esc(l.descripcion) + '<br>Autorizado ' + ppHtml(l.porArmar, l.capacidad) + ' · saldo ' + ppHtml(l.saldo, l.capacidad) + '</div>' + ppCampos() + campo('Responsable de la entrega', 'responsable', S.user.nombre, 'required'), function (o) {
+  modal('Entrega ' + turno + '° turno · ' + l.codigo, '<div class="calc">' + esc(l.descripcion) + '<br>' + (l.cancelada ? 'Armado disponible para entregar ' : 'Autorizado ') + ppHtml(l.cancelada ? l.armado : l.porArmar, l.capacidad) + ' · saldo ' + ppHtml(l.saldo, l.capacidad) + '</div>' + ppCampos() + campo('Responsable de la entrega', 'responsable', S.user.nombre, 'required'), function (o) {
     var c = cantDe(o, l.capacidad);
     if (!(c > 0)) { toast('Escribe pallets o puchos.', 1); return false; }
+    if (l.cancelada && c > l.saldo + 0.001) { toast('La programación está retirada. Solo puedes entregar lo ya armado que queda disponible (' + fn(l.saldo) + ' un.).', 1); return false; }
     var forzar = false;
-    if (l.entregado + c > l.porArmar + 0.001) {
+    if (!l.cancelada && l.entregado + c > l.porArmar + 0.001) {
       if (!confirm('La entrega supera lo autorizado (saldo ' + fn(l.saldo) + ' un.). ¿Registrar de todos modos? Quedará marcada en la auditoría.')) return false;
       forzar = true;
     }
@@ -768,7 +798,8 @@ document.addEventListener('click', function (e) {
     filtrar: function () { S.f = { desde: $('fd').value || S.f.desde, hasta: $('fh').value || S.f.hasta }; cargar(); },
     nlinea: function () { formLinea(); },
     elinea: function () { var l = lin(); if (String(l.id).indexOf('tmp_') === 0) return toast('Esa línea aún no se envió. Espera a sincronizar para editarla.'); formLinea({ id: l.id, fecha: l.fecha, codigo: l.codigo, programa: l.programa, nec: l.nec, adicional: l.adicional, stock: l.stock, nota: l.nota }); },
-    blinea: function () { if (confirm('¿Eliminar esta línea de programación?')) reg('eliminarLinea', { id: id }, 'Línea eliminada.'); }, traza: function () { traza(id); },
+    blinea: function () { if (confirm('¿Eliminar esta línea de programación?')) reg('eliminarLinea', { id: id }, 'Línea eliminada.'); },
+    cancela: function () { formCancelar(id); }, traza: function () { traza(id); },
     armar: function () { formArmado(id); }, entregar: function () { formEntrega(id, Number(b.dataset.t)); },
     mov: function () { formMov(b.dataset.t); }, nmerma: formMerma, nlote: formLote, najuste: formAjuste,
     nprod: function () { formProducto(); }, eprod: function () { formProducto(S.v.productos.filter(function (p) { return p.id === id; })[0]); },
