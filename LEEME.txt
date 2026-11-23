@@ -1,0 +1,23 @@
+SAC · CONTROL DE ARMADO DE CAJAS
+Guía rápida de publicación
+
+ESTRUCTURA
+Archivos principales en raíz; librerías locales en vendor/; iconos en icons/; Code.gs, Seed.gs y appsscript.json para Apps Script.
+
+1) GOOGLE SHEETS
+Usa una hoja nueva y vacía para esta versión, salvo que hayas confirmado que la existente no contiene datos que deban conservarse. Haz copia de seguridad antes de instalar. En la hoja: Extensiones > Apps Script. Pega Code.gs en Code.gs y crea un archivo de script Seed para pegar Seed.gs. En Configuración del proyecto activa el manifiesto appsscript.json y reemplázalo por el incluido. Guarda. Vuelve a la hoja, recarga y ejecuta 📦 SAC > 1) Instalar sistema. Autoriza permisos y guarda la clave temporal de admin; cámbiala al entrar.
+
+2) PUBLICAR API
+Apps Script: Implementar > Nueva implementación > Aplicación web. Ejecutar como: Yo. Configura el acceso que permita a la PWA llamar la API según las políticas de tu cuenta. Implementa y copia la URL /exec.
+
+3) CONFIGURAR PWA
+En config.js reemplaza API_URL: '' por la URL /exec.
+
+4) GITHUB PAGES
+Crea un repositorio nuevo en GitHub y sube el contenido de esta carpeta manteniendo index.html en la raíz y las carpetas vendor/ e icons/. En Settings > Pages selecciona Deploy from a branch, rama main, carpeta /(root), y guarda. Espera la URL HTTPS.
+
+5) PRUEBAS
+Abre la URL HTTPS. Comprueba acceso, cambio de clave, carga de datos, registro y sincronización. Luego prueba offline. No uses datos reales hasta validar permisos y sincronización.
+
+NOTAS
+Seed.gs contiene una semilla parcial de productos: valida el catálogo antes de producción. appsscript.json declara ANYONE_ANONYMOUS; revisa seguridad y políticas organizacionales. No borres datos del navegador si hay operaciones offline pendientes.
