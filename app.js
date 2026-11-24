@@ -474,27 +474,93 @@ function barraFiltro() {
   var P = [['todos', 'Todos'], ['pendiente', 'Pendientes'], ['proceso', 'En proceso'], ['completo', 'Completos']];
   return '<div class="pills">' + P.map(function (p) { return '<button data-e="' + p[0] + '" class="' + (S.estado === p[0] ? 'on' : '') + '">' + p[1] + '</button>'; }).join('') + '</div><div class="bar"><label class="f" style="flex:1"><span>Buscar</span><input id="q" placeholder="Código, descripción o proveedor" value="' + esc(S.q) + '"></label></div><div id="lista">';
 }
-var PERS_MIN = 2, PERS_MAX = 3;   /* trabajadores del proveedor por máquina (debe coincidir con Code.gs) */
+var PERS_MIN_DEF = 2, PERS_MAX_DEF = 3, PERS_TOPE = 50, RANGO_TOPE = 20;   /* por defecto, hasta que el administrador defina otro rango (igual que Code.gs) */
+function rangoPers(planta, prov, fecha) {   /* rango acordado vigente: el último cuya fecha "desde" sea <= fecha */
+  var r = null;
+  (S.v.rangoPersonal || []).forEach(function (x) { if (x.planta === planta && x.proveedor === prov && x.desde <= fecha && (!r || x.desde > r.desde)) r = x; });
+  return r ? { minimo: r.minimo, maximo: r.maximo, desde: r.desde } : { minimo: PERS_MIN_DEF, maximo: PERS_MAX_DEF, desde: '' };
+}
+function chipPers(r) {
+  if (r.estado === 'falta') return chip('Faltan ' + (r.minimo - r.cantidad), 'bad');
+  if (r.estado === 'excede') return chip('+' + (r.cantidad - r.maximo) + ' sobre el máximo', 'warn');
+  return chip('Cumple', 'ok');
+}
+function txtPers(r) { return r.estado === 'falta' ? 'Faltan ' + (r.minimo - r.cantidad) : (r.estado === 'excede' ? '+' + (r.cantidad - r.maximo) + ' sobre el máximo' : 'Cumple'); }
 PAG.personal = function () {
-  var R = S.v.personal || [], e = ed('personal') && esAdmin(), tp = S.planta === 'TODAS' ? [C('Planta', 'planta')] : [];
-  var tot = R.reduce(function (s, r) { return s + r.cantidad; }, 0), dias = {}, prov = {};
-  R.forEach(function (r) { dias[r.fecha] = 1; prov[r.proveedor] = (prov[r.proveedor] || 0) + r.cantidad; });
-  var kpi = '<div class="grid two" style="margin-bottom:14px"><div class="card"><small class="pu">Trabajadores-día registrados</small><div class="big">' + fn(tot) + '</div><div class="ds">' + R.length + ' máquinas-día · ' + Object.keys(dias).length + ' día(s) · promedio ' + (R.length ? (tot / R.length).toFixed(1) : '0') + ' por máquina</div></div>' +
-    '<div class="card"><small class="pu">Por proveedor</small>' + (Object.keys(prov).length ? Object.keys(prov).sort().map(function (k) { return '<div class="ds"><b>' + esc(k) + '</b> · ' + fn(prov[k]) + ' trabajadores-día</div>'; }).join('') : '<div class="ds">Sin datos en el rango.</div>') + '</div></div>';
-  var cols = tp.concat([C('Fecha', 'fecha', { f: function (r) { return verFecha(r.fecha); }, v: function (r) { return verFecha(r.fecha); } }), C('Proveedor', 'proveedor'), C('Máquina', 'maquina'), C('Trabajadores', 'cantidad', { n: 1 }), C('Registrado por', 'usuario')]);
-  if (e) cols.push({ t: '', p: 1, f: function (r) { return '<button class="btn ghost sm" data-a="eper" data-id="' + r.id + '">Editar</button> <button class="btn red sm" data-a="bper" data-id="' + r.id + '">✕</button>'; } });
-  return kpi + (e ? '<div class="bar"><button class="btn" data-a="nper">' + ic('plus') + ' Registrar personal</button></div>' : (esAdmin() ? '<p class="pu">Elige una planta para registrar personal.</p>' : '')) +
-    '<p class="pu">Por máquina: mínimo ' + PERS_MIN + ' y máximo ' + PERS_MAX + ' trabajadores del proveedor. Solo el administrador registra y edita.</p>' + tabla(cols, R, { exp: 'personal', titulo: 'Personal de proveedores por máquina', vacio: 'No hay personal registrado en este rango.' });
+  var R = S.v.personal || [], adm = esAdmin(), e = ed('personal') && adm, todas = S.planta === 'TODAS';
+  var est = ['cumple', 'falta', 'excede'].indexOf(S.estado) > -1 ? S.estado : 'todos';
+  var n = { cumple: 0, falta: 0, excede: 0 }, asist = 0, esp = 0, falt = 0;
+  R.forEach(function (r) { n[r.estado]++; asist += r.cantidad; esp += r.minimo; falt += Math.max(0, r.minimo - r.cantidad); });
+  var pc = R.length ? Math.round((n.cumple + n.excede) / R.length * 100) : 0;
+  var kp = [['b-az', 'calendar', 'Máquinas-día registradas', R.length], ['b-vi', 'users', 'Personas que asistieron', fn(asist)], ['b-na', 'tag', 'Mínimo acordado', fn(esp)],
+    ['b-ro', 'alert', 'Personas que faltaron', fn(falt)], ['b-ve', 'check', 'Cumplimiento', pc + '%'], ['b-na', 'alert', 'Sobre el máximo', n.excede]];
+  var kpis = '<div class="grid kpis">' + kp.map(function (k) { return '<div class="card kpi"><div class="bub ' + k[0] + '">' + ic(k[1]) + '</div><div><small>' + k[2] + '</small><b>' + k[3] + '</b></div></div>'; }).join('') + '</div>';
+
+  /* Rango acordado vigente hoy, por proveedor */
+  var hoy = (S.d && S.d.hoy) || '', plantasV = todas ? (S.plantas || []).map(function (p) { return p.codigo; }) : [S.planta];
+  var rg = '';
+  plantasV.forEach(function (pl) {
+    (S.v.proveedores || []).slice().sort().forEach(function (pv) {
+      var r = rangoPers(pl, pv, hoy);
+      rg += '<div class="lbl" style="align-items:center"><span><b style="color:var(--tx)">' + esc(pv) + '</b>' + (todas ? ' · ' + esc(pl) : '') + '</span><span>' + r.minimo + (r.minimo === r.maximo ? '' : ' a ' + r.maximo) + ' por máquina ' +
+        (r.desde ? '<span class="pu">(desde ' + verFecha(r.desde) + ')</span>' : '<span class="pu">(por defecto)</span>') +
+        (adm && !todas ? ' <button class="btn ghost sm" data-a="rper" data-id="' + esc(pv) + '">Cambiar</button>' : '') + '</span></div>';
+    });
+  });
+  var cardRango = '<div class="card" style="margin-bottom:14px"><b>Rango acordado de armadores por máquina</b><p class="pu" style="margin:4px 0 8px">Vigente hoy. Si cambia el acuerdo, usa «Cambiar» e indica desde qué fecha rige: los registros anteriores se siguen comparando con el rango que tenían.</p>' + (rg || '<span class="pu">No hay proveedores registrados.</span>') + '</div>';
+
+  /* Resumen por proveedor */
+  var gr = {};
+  R.forEach(function (r) {
+    var k = r.planta + '|' + r.proveedor, g = gr[k] = gr[k] || { planta: r.planta, proveedor: r.proveedor, md: 0, asist: 0, esp: 0, falt: 0, ok: 0 };
+    g.md++; g.asist += r.cantidad; g.esp += r.minimo; g.falt += Math.max(0, r.minimo - r.cantidad); if (r.estado !== 'falta') g.ok++;
+  });
+  var res = Object.keys(gr).sort().map(function (k) { var g = gr[k]; g.pct = Math.round(g.ok / g.md * 100); return g; });
+  var colsR = (todas ? [C('Planta', 'planta')] : []).concat([C('Proveedor', 'proveedor'), C('Máquinas-día', 'md', { n: 1 }), C('Asistieron', 'asist', { n: 1 }), C('Mínimo acordado', 'esp', { n: 1 }), C('Faltaron', 'falt', { n: 1 }),
+    C('Cumplimiento', 'pct', { f: function (g) { return '<div style="min-width:110px"><b>' + g.pct + '%</b>' + barra(g.pct) + '</div>'; }, v: function (g) { return g.pct + '%'; } })]);
+
+  /* Detalle */
+  var F = est === 'todos' ? R : R.filter(function (r) { return r.estado === est; });
+  var pills = [['todos', 'Todos (' + R.length + ')'], ['cumple', 'Cumplen (' + n.cumple + ')'], ['falta', 'Faltan personas (' + n.falta + ')'], ['excede', 'Sobre el máximo (' + n.excede + ')']];
+  var colsD = (todas ? [C('Planta', 'planta')] : []).concat([C('Fecha', 'fecha', { f: function (r) { return verFecha(r.fecha); }, v: function (r) { return verFecha(r.fecha); } }), C('Proveedor', 'proveedor'), C('Máquina', 'maquina'),
+    C('Asistieron', 'cantidad', { n: 1 }), C('Acordado', 'minimo', { f: function (r) { return r.minimo + (r.minimo === r.maximo ? '' : ' a ' + r.maximo); }, v: function (r) { return r.minimo + ' a ' + r.maximo; } }),
+    C('Estado', 'estado', { f: chipPers, v: txtPers }), C('Registrado por', 'usuario')]);
+  if (e) colsD.push({ t: '', p: 1, f: function (r) { return '<button class="btn ghost sm" data-a="eper" data-id="' + r.id + '">Editar</button> <button class="btn red sm" data-a="bper" data-id="' + r.id + '">✕</button>'; } });
+
+  return kpis + cardRango +
+    (e ? '<div class="bar"><button class="btn" data-a="nper">' + ic('plus') + ' Registrar asistencia</button></div>' : (adm ? '<p class="pu">Elige una planta para registrar asistencia o cambiar el rango.</p>' : '')) +
+    '<h3 style="margin:6px 0 8px">Resumen por proveedor</h3>' + tabla(colsR, res, { exp: 'personal_resumen', titulo: 'Resumen de asistencia por proveedor', vacio: 'No hay asistencia registrada en este rango de fechas.' }) +
+    '<h3 style="margin:18px 0 8px">Detalle por máquina</h3><div class="pills">' + pills.map(function (p) { return '<button data-e="' + p[0] + '" class="' + (est === p[0] ? 'on' : '') + '">' + p[1] + '</button>'; }).join('') + '</div>' +
+    tabla(colsD, F, { exp: 'personal', titulo: 'Asistencia de personal de proveedores por máquina', vacio: 'No hay registros con este filtro.' });
 };
 function formPersonal(r) {
-  r = r || { fecha: (S.d && S.d.hoy) || '', proveedor: '', maquina: '', cantidad: PERS_MIN };
+  r = r || { fecha: (S.d && S.d.hoy) || '', proveedor: '', maquina: '', cantidad: '' };
   var provs = (S.v.proveedores || []).slice().sort(), maqs = {};
   (S.v.personal || []).forEach(function (x) { if (x.planta === S.planta) maqs[x.maquina] = 1; });
-  modal(r.id ? 'Editar personal' : 'Registrar personal · ' + S.planta,
+  modal(r.id ? 'Editar asistencia' : 'Registrar asistencia · ' + S.planta,
     campo('Fecha', 'fecha', r.fecha, 'type="date" required') + sel('Proveedor', 'proveedor', provs, r.proveedor) +
     '<datalist id="dlm">' + Object.keys(maqs).sort().map(function (m) { return '<option value="' + esc(m) + '">'; }).join('') + '</datalist>' + campo('Máquina (ej. Máquina 1)', 'maquina', r.maquina, 'required list="dlm"') +
-    sel('Trabajadores del proveedor en esta máquina', 'cantidad', [PERS_MIN, PERS_MAX].map(function (n) { return [String(n), n + ' personas']; }), String(r.cantidad)),
-    function (o) { if (r.id) o.id = r.id; return reg('guardarPersonal', o, 'Personal guardado.'); });
+    campo('Personas que asistieron (0 si no vino nadie)', 'cantidad', r.cantidad, 'type="number" min="0" max="' + PERS_TOPE + '" step="1" required inputmode="numeric"') + '<div id="phint" class="pu" style="margin-top:6px"></div>',
+    function (o) { if (r.id) o.id = r.id; return reg('guardarPersonal', o, 'Asistencia guardada.'); });
+  var f = $('mf'); if (!f) return;
+  function hint() {
+    var el = function (x) { return f.elements.namedItem(x); }, rg = rangoPers(S.planta, el('proveedor').value, el('fecha').value), c = el('cantidad').value, h = $('phint'); if (!h) return;
+    var t = 'Acordado para este proveedor: ' + rg.minimo + (rg.minimo === rg.maximo ? '' : ' a ' + rg.maximo) + ' por máquina.';
+    if (c !== '') { c = Number(c); t += c < rg.minimo ? ' <b style="color:var(--ba)">Faltan ' + (rg.minimo - c) + '.</b>' : (c > rg.maximo ? ' <b style="color:var(--wa)">Supera el máximo en ' + (c - rg.maximo) + '.</b>' : ' <b style="color:var(--ok)">Cumple.</b>'); }
+    h.innerHTML = t;
+  }
+  ['proveedor', 'fecha', 'cantidad'].forEach(function (n) { var x = f.elements.namedItem(n); x.addEventListener('input', hint); x.addEventListener('change', hint); }); hint();
+}
+function formRango(prov) {
+  var hoy = (S.d && S.d.hoy) || '', vig = rangoPers(S.planta, prov, hoy), provs = (S.v.proveedores || []).slice().sort();
+  var hist = (S.v.rangoPersonal || []).filter(function (x) { return x.planta === S.planta && x.proveedor === prov; }).sort(function (a, b) { return b.desde < a.desde ? -1 : 1; });
+  modal('Rango acordado · ' + prov,
+    sel('Proveedor', 'proveedor', provs, prov) + campo('Rige desde', 'desde', hoy, 'type="date" required') +
+    campo('Mínimo de armadores por máquina', 'minimo', vig.minimo, 'type="number" min="0" max="' + RANGO_TOPE + '" step="1" required inputmode="numeric"') +
+    campo('Máximo de armadores por máquina', 'maximo', vig.maximo, 'type="number" min="0" max="' + RANGO_TOPE + '" step="1" required inputmode="numeric"') +
+    '<p class="pu">Los registros desde esa fecha se compararán con este rango. Los anteriores conservan el suyo.</p>' +
+    (hist.length ? '<p class="pu"><b>Historial de este proveedor:</b><br>' + hist.map(function (x) { return 'Desde ' + verFecha(x.desde) + ': ' + x.minimo + ' a ' + x.maximo; }).join('<br>') + '</p>' : '<p class="pu">Aún no hay cambios guardados: se usa el rango por defecto (' + PERS_MIN_DEF + ' a ' + PERS_MAX_DEF + ').</p>'),
+    function (o) { return reg('guardarRangoPersonal', o, 'Rango guardado.'); });
 }
 PAG.armado = function () { return barraFiltro() + listaLineas('armado') + '</div>'; };
 PAG.entregas = function () { return barraFiltro() + listaLineas('entregas') + '</div>'; };
@@ -828,7 +894,7 @@ document.addEventListener('click', function (e) {
     mov: function () { formMov(b.dataset.t); }, nmerma: formMerma, nlote: formLote, najuste: formAjuste,
     nprod: function () { formProducto(); }, eprod: function () { formProducto(S.v.productos.filter(function (p) { return p.id === id; })[0]); },
     nuser: function () { formUsuario(); }, euser: function () { formUsuario(S.v.usuarios.filter(function (u) { return u.usuario === b.dataset.u; })[0]); },
-    nper: function () { formPersonal(); }, eper: function () { formPersonal(S.v.personal.filter(function (r) { return r.id === id; })[0]); },
+    rper: function () { formRango(id); }, nper: function () { formPersonal(); }, eper: function () { formPersonal(S.v.personal.filter(function (r) { return r.id === id; })[0]); },
     bper: function () { if (confirm('¿Eliminar este registro de personal?')) reg('eliminarPersonal', { id: id }, 'Registro eliminado.'); },
     nubi: function () { formUbi(); }, eubi: function () { formUbi(S.v.ubicaciones.filter(function (u) { return u.id === id; })[0]); },
     confimp: confirmarImport,
